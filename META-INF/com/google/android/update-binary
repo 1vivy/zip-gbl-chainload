@@ -25,6 +25,10 @@ abort() { ui_print "ABORT: $1"; exit 1; }
 
 # --- unpack ourselves into a private scratch dir ---
 WORKDIR=/tmp/gbl-zip.$$
+# Minimal cleanup trap, armed before mkdir/unzip so a bootstrap failure
+# does not leak the workdir. core/safety.sh installs the canonical
+# 'trap cleanup EXIT' (which also restores SELinux context) once sourced.
+trap 'rm -rf "$WORKDIR"' EXIT
 mkdir -p "$WORKDIR" || abort "cannot create workdir"
 unzip -o "$ZIPFILE" -d "$WORKDIR" >/dev/null 2>&1 || abort "unzip failed"
 
