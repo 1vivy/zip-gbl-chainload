@@ -1,0 +1,55 @@
+#!/sbin/sh
+# shellcheck shell=sh
+# shellcheck disable=SC1090,SC2154
+#
+# zip-gbl-chainload — mode-agnostic flashable-ZIP core.
+# Recovery (or a rooted booted system) execs:
+#     update-binary  <api>  <OUTFD>  <zipfile>
+# Conventions: gbl-chainload docs/project/zip-methodology.md
+#
+# This file holds NO mode-specific logic. It sets up the environment,
+# sources core/*.sh, then dispatches to the single mode named in
+# modes/SELECTED. One ZIP carries exactly one mode.
+
+OUTFD=$2
+ZIPFILE="$3"
+
+# --- bootstrap ui_print / abort: usable BEFORE core/ is extracted.
+#     core/ui.sh and core/safety.sh redefine these canonically once
+#     the ZIP is unpacked. (zip-methodology A2) ---
+ui_print() {
+  echo "ui_print $1
+ui_print" >> /proc/self/fd/"$OUTFD"
+}
+abort() { ui_print "ABORT: $1"; exit 1; }
+
+# --- unpack ourselves into a private scratch dir ---
+WORKDIR=/tmp/gbl-zip.$$
+mkdir -p "$WORKDIR" || abort "cannot create workdir"
+unzip -o "$ZIPFILE" -d "$WORKDIR" >/dev/null 2>&1 || abort "unzip failed"
+
+# --- source the core; canonical ui_print/abort/cleanup land here, and
+#     core/safety.sh installs the EXIT trap ---
+for f in env ota ui busybox partition safety; do
+  [ -f "$WORKDIR/core/$f.sh" ] || abort "core/$f.sh missing from ZIP"
+  . "$WORKDIR/core/$f.sh"
+done
+
+# --- resolve the mode ---
+[ -f "$WORKDIR/modes/SELECTED" ] || abort "modes/SELECTED missing"
+MODE=$(cat "$WORKDIR/modes/SELECTED")
+[ -n "$MODE" ] || abort "modes/SELECTED is empty"
+[ -f "$WORKDIR/modes/$MODE.conf" ] || abort "modes/$MODE.conf missing"
+[ -f "$WORKDIR/modes/$MODE.sh" ]   || abort "modes/$MODE.sh missing"
+. "$WORKDIR/modes/$MODE.conf"
+. "$WORKDIR/modes/$MODE.sh"
+
+ui_print "gbl-chainload installer - mode: $MODE"
+ui_print "======================================"
+
+command -v mode_main >/dev/null 2>&1 || abort "modes/$MODE.sh defines no mode_main"
+mode_main
+
+ui_print ""
+ui_print "DONE."
+exit 0
