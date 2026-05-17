@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# update-tools.sh — refresh the vendored tool binaries and base EFIs
+# update-tools.sh — refresh the vendored tool binaries and the base EFI
 # from a gbl-chainload parent checkout, and (re)write bin/MANIFEST.
 #
 # Run from inside the submodule checkout. The parent gbl-chainload repo
@@ -22,9 +22,8 @@ fi
 
 echo "==> building recovery tools from $PARENT"
 bash "$PARENT/scripts/build-recovery-tools.sh"
-echo "==> building base EFIs"
+echo "==> building the base EFI"
 bash "$PARENT/scripts/build.sh" --mode 1
-bash "$PARENT/scripts/build.sh" --mode 2
 
 echo "==> copying artifacts into bin/ and base/"
 mkdir -p "$SELF_DIR/bin" "$SELF_DIR/base"
@@ -32,7 +31,6 @@ for t in fv-unwrap abl-patcher gbl-pack gbl-commit; do
   cp "$PARENT/dist/recovery/$t" "$SELF_DIR/bin/$t"
 done
 cp "$PARENT/dist/mode-1.efi" "$SELF_DIR/base/mode-1.efi"
-cp "$PARENT/dist/mode-2.efi" "$SELF_DIR/base/mode-2.efi"
 
 [ -f "$SELF_DIR/bin/busybox-arm64" ] \
   || { echo "error: bin/busybox-arm64 missing - vendor it once at bootstrap" >&2; exit 1; }
@@ -51,7 +49,7 @@ fi
   echo "# parent-dirty: $PDIRTY"
   ( cd "$SELF_DIR" && sha256sum \
       bin/fv-unwrap bin/abl-patcher bin/gbl-pack bin/gbl-commit \
-      bin/busybox-arm64 base/mode-1.efi base/mode-2.efi )
+      bin/busybox-arm64 base/mode-1.efi )
 } > "$SELF_DIR/bin/MANIFEST"
 
 echo "==> done. Review, commit the submodule, and bump its pointer in the parent."
