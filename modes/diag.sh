@@ -39,7 +39,12 @@ mode_main() {
   if [ -n "$BYNAME" ]; then
     n=$(ls "$BYNAME" 2>/dev/null | wc -l)
     ui_print "  by-name dir: $BYNAME ($n partitions)"
-    for p in efisp abl_a abl_b recovery vbmeta; do
+    # Static list of the partitions this project touches: efisp (install
+    # target), abl (cache source + loader-restore), vbmeta (SP4 graft
+    # target). All but efisp are A/B-slotted on the target devices.
+    # SP4 adds a vbmeta-descriptor walk here once the on-device
+    # vbmeta-parsing tool exists.
+    for p in efisp abl_a abl_b vbmeta_a vbmeta_b; do
       if [ -e "$BYNAME/$p" ]; then
         ui_print "    [present] $p"
       else
