@@ -40,10 +40,7 @@ mode_main() {
     n=$(ls "$BYNAME" 2>/dev/null | wc -l)
     ui_print "  by-name dir: $BYNAME ($n partitions)"
     # Static list of the partitions this project touches: efisp (install
-    # target), abl (cache source + loader-restore), vbmeta (SP4 graft
-    # target). All but efisp are A/B-slotted on the target devices.
-    # SP4 adds a vbmeta-descriptor walk here once the on-device
-    # vbmeta-parsing tool exists.
+    # target), abl (cache source + loader-restore), vbmeta (graft target).
     for p in efisp abl_a abl_b vbmeta_a vbmeta_b; do
       if [ -e "$BYNAME/$p" ]; then
         ui_print "    [present] $p"
@@ -51,6 +48,15 @@ mode_main() {
         ui_print "    [absent ] $p"
       fi
     done
+
+    # vbmeta descriptor walk: list the partitions the active slot's main
+    # vbmeta covers (handy context for the graft mode).
+    if [ -e "$BYNAME/vbmeta_$SLOT" ] && command -v vbmeta-graft >/dev/null 2>&1; then
+      dd if="$BYNAME/vbmeta_$SLOT" of="$WORKDIR/diag_vbmeta.img" bs=1M 2>/dev/null
+      ui_print "  vbmeta_$SLOT covers:"
+      vbmeta-graft list "$WORKDIR/diag_vbmeta.img" 2>/dev/null \
+        | while read -r line; do ui_print "    $line"; done
+    fi
   else
     ui_print "  by-name dir: NOT FOUND"
   fi
