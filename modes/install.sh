@@ -14,9 +14,12 @@
 
 BACKUP=/sdcard/backup_abl.img
 
-# vol_key <timeout-seconds> -> echoes UP | DOWN | TIMEOUT
+# vol_key <timeout-seconds> -> echoes UP | DOWN | TIMEOUT.
+# -lqc 200: read enough events that the key press is not missed amid
+# unrelated input (a press is paired down/up + EV_SYN, plus other input
+# devices); grep -m1 stops getevent at the first vol-key match.
 vol_key() {
-  _k=$(timeout "$1" getevent -lqc 5 2>/dev/null \
+  _k=$(timeout "$1" getevent -lqc 200 2>/dev/null \
          | grep -m1 -oE 'KEY_(VOLUMEUP|VOLUMEDOWN)' || true)
   case "$_k" in
     KEY_VOLUMEUP)   echo UP ;;
@@ -176,4 +179,5 @@ mode_main() {
   save_backup_abl
   ui_print ""
   ui_print "install: done - reboot to use the cached ABL."
+  ui_print "backups kept: /sdcard/efisp.bak, /sdcard/abl_$TARGET.bak"
 }
