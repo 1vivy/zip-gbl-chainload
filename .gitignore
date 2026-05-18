@@ -1,3 +1,4 @@
 # modes/SELECTED is generated into the staged tree by build-recovery-zip.sh
 # at assembly time; it is never committed.
 modes/SELECTED
+.omc/
