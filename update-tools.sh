@@ -27,7 +27,7 @@ bash "$PARENT/scripts/build.sh" --mode 1
 
 echo "==> copying artifacts into bin/ and base/"
 mkdir -p "$SELF_DIR/bin" "$SELF_DIR/base"
-for t in fv-unwrap abl-patcher gbl-pack gbl-commit; do
+for t in fv-unwrap abl-patcher gbl-pack gbl-commit vbmeta-graft; do
   cp "$PARENT/dist/recovery/$t" "$SELF_DIR/bin/$t"
 done
 cp "$PARENT/dist/mode-1.efi" "$SELF_DIR/base/mode-1.efi"
@@ -54,7 +54,7 @@ fi
   echo "# parent-dirty: $PDIRTY"
   ( cd "$SELF_DIR" && sha256sum \
       bin/fv-unwrap bin/abl-patcher bin/gbl-pack bin/gbl-commit \
-      bin/busybox-arm64 base/mode-1.efi )
+      bin/vbmeta-graft bin/busybox-arm64 base/mode-1.efi )
 } > "$SELF_DIR/bin/MANIFEST"
 
 echo "==> done. Review, commit the submodule, and bump its pointer in the parent."
