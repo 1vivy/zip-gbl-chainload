@@ -1,5 +1,5 @@
 # zip-gbl-chainload vendored-artifact manifest
-# parent-commit: fc87a41abf6cc1cd8c6243bbfc69b4f6b6f35600
+# parent-commit: 5def3e0d0deec564a0ee6294a17848e083479cd0
 # parent-dirty: 0
 7b22609b858ab1656163d09f30e34eae88a9ba2a61b639e6ea242f0873371e7c  bin/fv-unwrap
 e01af2066738fbbfdc46b314db4f51e2d1936c307e4924860c00abbfb59d2ac3  bin/abl-patcher

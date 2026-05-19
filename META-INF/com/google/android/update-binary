@@ -34,7 +34,7 @@ unzip -o "$ZIPFILE" -d "$WORKDIR" >/dev/null 2>&1 || abort "unzip failed"
 
 # --- source the core; canonical ui_print/abort/cleanup land here, and
 #     core/safety.sh installs the EXIT trap ---
-for f in env ota ui busybox partition safety; do
+for f in env ota ui busybox partition safety install_abl; do
   [ -f "$WORKDIR/core/$f.sh" ] || abort "core/$f.sh missing from ZIP"
   . "$WORKDIR/core/$f.sh"
 done
