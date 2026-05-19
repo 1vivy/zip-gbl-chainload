@@ -22,8 +22,8 @@ detect_oem() {
     [ -f "$_p" ] && { _bp="$_p"; break; }
   done
   [ -n "$_bp" ] || abort "build.prop not found (mount system/vendor first)"
-  _mfr=$(grep -m1 '^ro.product.*manufacturer=' "$_bp" \
-           | cut -d= -f2 | tr '[:upper:]' '[:lower:]')
+  _mfr=$(grep -m1 '^ro\.product\..*manufacturer=' "$_bp" \
+           | cut -d= -f2 | tr -d ' \t\r' | tr '[:upper:]' '[:lower:]')
   case "$_mfr" in
     *oneplus*|*oppo*) OEM_ID=oneplus ;;
     *) abort "unsupported OEM (build.prop manufacturer='$_mfr')" ;;
