@@ -9,10 +9,10 @@ A single mode-agnostic installer core (`META-INF/com/google/android/update-binar
 + `core/*.sh`) plus per-mode config. One ZIP carries one mode, named in
 `modes/SELECTED` (generated at assembly time). Modes:
 
-- `diag` — no-op environment diagnostic (no writes). Working.
-- `install` — gbl-chainload EFISP install. Stub (SP3).
-- `graft` — recovery vbmeta graft. Stub (SP4).
-- `profile` — mode-2 profile. Stub (later).
+- `diag` — no-op environment diagnostic (no writes). Working and release-safe.
+- `install` — gbl-chainload EFISP install/cache-ABL flow. Implemented; requires final device release validation before tagging.
+- `graft` — recovery vbmeta graft. Implemented; requires final device release validation before tagging.
+- `profile` — mode-2 profile ZIP. Not implemented yet; mode-2 profile tooling currently lives in the parent repo.
 
 ## Building a ZIP
 
@@ -20,7 +20,13 @@ ZIPs are assembled from the **parent** gbl-chainload checkout:
 
 ```
 scripts/build-recovery-zip.sh --mode diag    # -> dist/gbl-chainload-diag.zip
+scripts/build-recovery-zip.sh --mode install # -> dist/gbl-chainload-install.zip
+scripts/build-recovery-zip.sh --mode graft   # -> dist/gbl-chainload-graft.zip
 ```
+
+Do not publish a mode as release-ready solely because it assembles. The parent
+repo's `docs/project/release-checklist.md` is the release gate for device-tested
+ZIP modes.
 
 ## Refreshing vendored tools
 
