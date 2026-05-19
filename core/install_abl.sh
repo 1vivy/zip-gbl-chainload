@@ -1,12 +1,19 @@
 # shellcheck shell=sh
-# shellcheck disable=SC2154,SC2015
+# shellcheck disable=SC2154,SC2015,SC2153
+# SC2153: STEP/STEPS in _step are set by modes/install-common.sh's mode_main.
 # core/install_abl.sh — partition/slot-generic loader-ABL machinery.
 # Sourced by update-binary. Shared by the mode-N-install modes (via
 # modes/install-common.sh).
 # Functions: vol_key, abl_marker, pick_scenario, resolve_restore_source,
-#            restore_abl, save_backup_abl. Constant: BACKUP.
+#            restore_abl, save_backup_abl, _step. Constant: BACKUP.
 
 BACKUP=/sdcard/backup_abl.img
+
+# _step <message> -> advance the [N/STEPS] counter and announce the step.
+# STEP/STEPS are the running install counter set by modes/install-common.sh's
+# mode_main; defined here (sourced early by update-binary) so restore_abl and
+# the mode-N-install bodies all see it.
+_step() { STEP=$((STEP + 1)); ui_print "[$STEP/$STEPS] $1"; }
 
 # vol_key <timeout-seconds> -> echoes UP | DOWN | TIMEOUT.
 # -lqc 200: read enough events that the key press is not missed amid
@@ -103,11 +110,9 @@ resolve_restore_source() {
 }
 
 # restore_abl -> verified write of the restore source onto abl_<target>.
-# STEP/STEPS are the running step counter set by modes/install-common.sh; if
-# unset (no install-common consumer) the prefix degrades gracefully.
+# STEP/STEPS are the running step counter set by modes/install-common.sh.
 restore_abl() {
-  ui_print "[$((${STEP:-0}+1))/${STEPS:-?}] restoring loader ABL to abl_$TARGET (backup + verify)"
-  STEP=$((${STEP:-0}+1))
+  _step "restoring loader ABL to abl_$TARGET (backup + verify)"
   commit_verified "$RESTORE_SRC" "$TARGET_DEV" "/sdcard/abl_$TARGET.bak"
 }
 

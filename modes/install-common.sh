@@ -1,5 +1,6 @@
 # shellcheck shell=sh
-# shellcheck disable=SC2154,SC2015
+# shellcheck disable=SC2154,SC2015,SC2034
+# SC2034: STEP/STEPS are set here, consumed by core/install_abl.sh's _step.
 # modes/install-common.sh — shared body for the three mode-N-install modes.
 #
 # The mode-0/1/2 install modes share ~90% of their script: cache a patched ABL
@@ -38,6 +39,9 @@
 #   mode_prepare    runs after resolve_restore_source, before build_payload
 #                   (per-mode preparation that populates M_PATCHER_ARGS /
 #                   M_PACK_ARGS). mode-2-install.sh overrides both.
+# Both hooks run AFTER pick_scenario's interactive scenario prompt — a mode
+# that wants an early abort (e.g. unsupported-OEM in mode_prepare) will still
+# pay the vol-key scenario prompt first.
 
 # mode_preflight -> extra pre-flight gate hook. Default: no-op. Runs as the last
 # step of preflight, so an override's abort still fires before any write.
@@ -66,8 +70,7 @@ preflight() {
 # $WORKDIR/installed.efi (base EFI + payload). abl-patcher and gbl-pack get the
 # per-mode M_PATCHER_ARGS / M_PACK_ARGS appended.
 build_payload() {
-  ui_print "[$((STEP+1))/$STEPS] caching abl_$TARGET (patch args: ${M_PATCHER_ARGS:-none})"
-  STEP=$((STEP+1))
+  _step "caching abl_$TARGET (patch args: ${M_PATCHER_ARGS:-none})"
   dd if="$TARGET_DEV" of="$WORKDIR/cache_abl.img" bs=1M 2>/dev/null \
     || abort "failed to read abl_$TARGET"
   fv-unwrap "$WORKDIR/cache_abl.img" "$WORKDIR/extracted.efi" >/dev/null 2>&1 \
@@ -77,8 +80,7 @@ build_payload() {
   abl-patcher $M_PATCHER_ARGS \
     --in "$WORKDIR/extracted.efi" --out "$WORKDIR/patched.efi" \
     || abort "abl-patcher failed (no matching signatures?)"
-  ui_print "[$((STEP+1))/$STEPS] packing GBLP1 overlay"
-  STEP=$((STEP+1))
+  _step "packing GBLP1 overlay"
   # shellcheck disable=SC2086
   gbl-pack --cached-abl "$WORKDIR/patched.efi" \
            --source "$WORKDIR/cache_abl.img" \
@@ -91,8 +93,7 @@ build_payload() {
 
 # commit_efisp -> verified write of installed.efi onto EFISP.
 commit_efisp() {
-  ui_print "[$((STEP+1))/$STEPS] writing EFISP (backup + verify)"
-  STEP=$((STEP+1))
+  _step "writing EFISP (backup + verify)"
   commit_verified "$WORKDIR/installed.efi" "$EFISP_DEV" /sdcard/efisp.bak
 }
 

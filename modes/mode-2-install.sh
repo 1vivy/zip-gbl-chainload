@@ -45,8 +45,7 @@ detect_oem() {
 
 # build_profile -> derives + compiles the 120-byte mode2_profile binary.
 build_profile() {
-  ui_print "[$((STEP+1))/$STEPS] deriving + compiling mode-2 profile from stock vbmeta"
-  STEP=$((STEP+1))
+  _step "deriving + compiling mode-2 profile from stock vbmeta"
   mode2-profile derive "$STOCK_VBMETA" -o "$PROFILE_TOML" \
     || abort "mode2-profile derive failed"
   mode2-profile compile "$PROFILE_TOML" -o "$WORKDIR/profile.bin" \
