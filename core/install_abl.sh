@@ -1,7 +1,8 @@
 # shellcheck shell=sh
 # shellcheck disable=SC2154,SC2015
 # core/install_abl.sh — partition/slot-generic loader-ABL machinery.
-# Sourced by update-binary. Shared by install and profile modes.
+# Sourced by update-binary. Shared by the mode-N-install modes (via
+# modes/install-common.sh).
 # Functions: vol_key, abl_marker, pick_scenario, resolve_restore_source,
 #            restore_abl, save_backup_abl. Constant: BACKUP.
 
@@ -102,8 +103,11 @@ resolve_restore_source() {
 }
 
 # restore_abl -> verified write of the restore source onto abl_<target>.
+# STEP/STEPS are the running step counter set by modes/install-common.sh; if
+# unset (no install-common consumer) the prefix degrades gracefully.
 restore_abl() {
-  ui_print "[4/4] restoring loader ABL to abl_$TARGET (backup + verify)"
+  ui_print "[$((${STEP:-0}+1))/${STEPS:-?}] restoring loader ABL to abl_$TARGET (backup + verify)"
+  STEP=$((${STEP:-0}+1))
   commit_verified "$RESTORE_SRC" "$TARGET_DEV" "/sdcard/abl_$TARGET.bak"
 }
 
