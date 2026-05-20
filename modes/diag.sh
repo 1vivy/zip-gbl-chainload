@@ -218,19 +218,28 @@ collect_logfs() {
 # ----- confidence tier --------------------------------------------------
 
 decide_tier() {
+  # NONE: EFISP is not a PE.
   if [ "$EFISP_PE" = 0 ]; then
     echo "NONE — EFISP is not a PE"
     return
   fi
+  # LOW: GBLP1 container invalid or unverified.
   if [ "$GBLP1_OK" = 0 ]; then
     echo "LOW — GBLP1 invalid or unverified"
     return
   fi
-  if [ "$LOADER_PATH_A" = 1 ] || [ "$LOADER_PATH_B" = 1 ]; then
-    echo "HIGH — safe to reboot into chainload"
-  else
-    echo "MEDIUM — GBLP1 valid; neither slot's ABL retains loader path (EFISP won't be loaded)"
+  # MEDIUM-B: GBLP1 valid but base-EFI fingerprint did not match any MANIFEST entry.
+  if [ -z "$BASE_EFI_MODE" ]; then
+    echo "MEDIUM — GBLP1 valid; base-EFI fingerprint does not match any known mode-N hash"
+    return
   fi
+  # MEDIUM-A: GBLP1 valid + base-EFI matches, but neither slot retains loader path.
+  if [ "$LOADER_PATH_A" != 1 ] && [ "$LOADER_PATH_B" != 1 ]; then
+    echo "MEDIUM — GBLP1 valid; neither slot's ABL retains loader path (EFISP won't be loaded)"
+    return
+  fi
+  # HIGH: all checks pass.
+  echo "HIGH — safe to reboot into chainload"
 }
 
 # ----- finalize --------------------------------------------------------
