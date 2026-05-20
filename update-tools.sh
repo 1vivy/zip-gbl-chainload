@@ -30,7 +30,7 @@ bash "$PARENT/scripts/build.sh" --mode 2
 
 echo "==> copying artifacts into bin/ and base/"
 mkdir -p "$SELF_DIR/bin" "$SELF_DIR/base"
-for t in fv-unwrap abl-patcher gbl-pack gbl-commit vbmeta-graft mode2-profile; do
+for t in fv-unwrap abl-patcher gbl-pack gbl-commit vbmeta-graft mode2-profile gblp1-inspect; do
   cp "$PARENT/dist/recovery/$t" "$SELF_DIR/bin/$t"
 done
 cp "$PARENT/dist/mode-0.efi" "$SELF_DIR/base/mode-0.efi"
@@ -59,7 +59,7 @@ fi
   echo "# parent-dirty: $PDIRTY"
   ( cd "$SELF_DIR" && sha256sum \
       bin/fv-unwrap bin/abl-patcher bin/gbl-pack bin/gbl-commit \
-      bin/vbmeta-graft bin/mode2-profile bin/busybox-arm64 \
+      bin/vbmeta-graft bin/mode2-profile bin/gblp1-inspect bin/busybox-arm64 \
       base/mode-0.efi base/mode-1.efi base/mode-2.efi )
 } > "$SELF_DIR/bin/MANIFEST"
 
