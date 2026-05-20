@@ -138,7 +138,7 @@ collect_abl() {
       _scan_target="$BUNDLE_DIR/abl_$_slot.img"
     fi
     if scan_for_loader_path "$_scan_target"; then
-      eval "LOADER_PATH_$(echo "$_slot" | tr 'a-z' 'A-Z')=1"
+      eval "LOADER_PATH_$(echo "$_slot" | tr '[:lower:]' '[:upper:]')=1"
       echo "abl_$_slot: retains loader path" >> "$BUNDLE_DIR/loader-abl.txt"
     else
       echo "abl_$_slot: does NOT retain loader path — WON'T LOAD EFISP" >> "$BUNDLE_DIR/loader-abl.txt"
