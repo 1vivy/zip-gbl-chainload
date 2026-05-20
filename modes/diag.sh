@@ -1,13 +1,16 @@
 # shellcheck shell=sh
 # shellcheck disable=SC2154,SC2012
 # modes/diag.sh — pre-reboot EFISP-install confidence + state-bundle.
-# Zero device writes. Produces /sdcard/gbl-chainload-diag-<ts>/ and a
-# sibling .tar.gz that off-device analysis can chew on. See
-# docs/superpowers/specs/2026-05-19-diag-confidence-design.md.
+# Zero device writes. Stages a working dir at $BUNDLE_WORKDIR (default
+# /tmp — recovery tmpfs, lost on reboot) and produces a single
+# $BUNDLE_ROOT/gbl-chainload-diag-<ts>.tar.gz (default /sdcard) for the
+# operator to keep. The working dir is removed once the tarball is in
+# place. See docs/superpowers/specs/2026-05-19-diag-confidence-design.md.
 
 TS=$(date +%Y%m%d-%H%M%S 2>/dev/null || echo unknown)
-BUNDLE_ROOT="${BUNDLE_ROOT:-/sdcard}"
-BUNDLE_DIR="$BUNDLE_ROOT/gbl-chainload-diag-$TS"
+BUNDLE_ROOT="${BUNDLE_ROOT:-/sdcard}"          # where the .tar.gz lands
+BUNDLE_WORKDIR="${BUNDLE_WORKDIR:-/tmp}"       # where the staging dir lives
+BUNDLE_DIR="$BUNDLE_WORKDIR/gbl-chainload-diag-$TS"
 BUNDLE_TGZ="$BUNDLE_ROOT/gbl-chainload-diag-$TS.tar.gz"
 
 # Track scalar state for the confidence-tier decision.
@@ -16,16 +19,14 @@ GBLP1_OK=0              # 1 if gblp1-inspect ended with result: ok
 BASE_EFI_MODE=""        # mode-0 / mode-1 / mode-2 / unknown
 LOADER_PATH_A=0         # 1 if abl_a retains loader path
 LOADER_PATH_B=0         # 1 if abl_b retains loader path
-GRAFT_NEEDED_LIST=""    # space-separated partitions needing graft mode
-FAKELOCK_NEEDED_LIST="" # space-separated partitions needing fakelock (hash mismatch)
-LOGFS_HISTORY=0         # count of prior GblChainload_BootN.txt
-LOGFS_NEWEST=""         # newest filename
+GRAFT_NEEDED_LIST=""    # space-separated partitions with chain mismatches (graft=missing)
+FAKELOCK_NEEDED_LIST="" # space-separated partitions with direct-hash mismatches (graft=n/a)
 
 # ----- bundle plumbing ------------------------------------------------
 
 prepare_bundle() {
   mkdir -p "$BUNDLE_DIR" || abort "cannot create $BUNDLE_DIR"
-  # Free-space gate: warn if less than 100 MiB available.
+  # Free-space gate on $BUNDLE_ROOT for the .tar.gz artifact.
   _free_kb=$(df -k "$BUNDLE_ROOT" 2>/dev/null | awk 'NR==2 {print $4}')
   case "$_free_kb" in
     ''|*[!0-9]*) ;;
@@ -60,6 +61,18 @@ collect_env() {
 }
 
 # ----- EFISP -----------------------------------------------------------
+
+# Map a GBLP1 entry type-name (as printed by gblp1-inspect, e.g. CACHED_ABL)
+# to an operator-friendly label. Unknown types are echoed as-is so a future
+# entry-type addition still surfaces something rather than nothing.
+_entry_pretty_label() {
+  case "$1" in
+    CACHED_ABL)    echo "cached patched ABL" ;;
+    SOURCE_META)   echo "source metadata"    ;;
+    MODE2_PROFILE) echo "mode-2 profile"     ;;
+    *)             echo "$1"                 ;;
+  esac
+}
 
 collect_efisp() {
   # Always create these files so the bundle is complete regardless of result.
@@ -109,6 +122,18 @@ collect_efisp() {
 
   if [ "$GBLP1_OK" = 1 ]; then
     ui_print "  EFISP        : ${BASE_EFI_MODE:-unknown-base} + GBLP1 v1 ok"
+    # Sub-line per GBLP1 entry, in the order gblp1-inspect emitted them.
+    # awk over `entry:` lines, pluck the parenthesised type name, label it.
+    awk '/^entry:/ {
+      for(i=1;i<=NF;i++) if ($i ~ /^\(/) {
+        gsub(/[()]/, "", $i); print $i; next
+      }
+    }' "$BUNDLE_DIR/gblp1-inspect.txt" | while IFS= read -r _type; do
+      [ -n "$_type" ] || continue
+      _label=$(_entry_pretty_label "$_type")
+      # Indent so the dash sits under the EFISP value column.
+      ui_print "                 - $_label: attached"
+    done
   else
     _why=$(awk -F': ' '/^result: /{print $2; exit}' "$BUNDLE_DIR/gblp1-inspect.txt")
     ui_print "  EFISP        : PE present, GBLP1 ${_why:-error}"
@@ -164,17 +189,38 @@ collect_vbmeta() {
   fi
 }
 
+# Decide whether a graft (chain-partition) mismatch needs operator action
+# given the installed chainload mode. Mode-2 keeps ABL honest (orange-state
+# boot) so chain-vbmeta-footer mismatches pass through under AVB's
+# unverified-but-allowed path; mode-0 / mode-1 / unknown need real graft.
+_mode_handles_graft() {
+  [ "$BASE_EFI_MODE" = "mode-2" ]
+}
+
+# Decide whether a direct-hash mismatch in main vbmeta needs fakelock.
+# Mode-2 patches the KM/SPSS RoT downstream at the TA boundary, so a
+# vbmeta-stage hash mismatch surfacing as orange state to ABL/KM is fine.
+# Mode-1's fakelock targets the QCOM_VERIFIEDBOOT_PROTOCOL view which is
+# *downstream* of AVB hash verification — the hash mismatch itself would
+# still trip AVB, so install-time intervention is still required.
+_mode_handles_fakelock() {
+  [ "$BASE_EFI_MODE" = "mode-2" ]
+}
+
 check_graft() {
   if [ ! -f "$BUNDLE_DIR/vbmeta_$SLOT.img" ]; then
-    ui_print "  graft needed : UNKNOWN (no active vbmeta)"
-    ui_print "  fakelock req : UNKNOWN (no active vbmeta)"
+    ui_print "  graft needed : unknown (no active vbmeta)"
+    ui_print "  fakelock req : unknown (no active vbmeta)"
     : > "$BUNDLE_DIR/graft-verdict.txt"
     return
   fi
   GBL_VBMETA_SLOT="$SLOT" vbmeta-graft list-hash \
     "$BUNDLE_DIR/vbmeta_$SLOT.img" "$BYNAME" > "$BUNDLE_DIR/graft-verdict.txt" 2>&1 || true
 
-  # Bucket mismatches: graft=missing -> graft mode; graft=n/a -> fakelock.
+  # Bucket mismatches: graft=missing -> chain-partition vbmeta missing
+  # (needs graft mode under a no-runtime-mitigation chainload).
+  #                    graft=n/a    -> direct-hash mismatch in main vbmeta
+  # (needs fakelock).  graft-verdict.txt in the bundle has the raw rows.
   GRAFT_NEEDED_LIST=$(awk '/verdict=mismatch/ && /graft=missing/ {
     for(i=1;i<=NF;i++) if($i ~ /^partition=/) {split($i,a,"="); printf "%s ",a[2]}
   }' "$BUNDLE_DIR/graft-verdict.txt" | sed 's/ $//')
@@ -182,41 +228,37 @@ check_graft() {
     for(i=1;i<=NF;i++) if($i ~ /^partition=/) {split($i,a,"="); printf "%s ",a[2]}
   }' "$BUNDLE_DIR/graft-verdict.txt" | sed 's/ $//')
 
-  if [ -n "$GRAFT_NEEDED_LIST" ]; then
-    ui_print "  graft needed : YES — $GRAFT_NEEDED_LIST"
+  # Render the graft line, mode-aware.
+  if [ -z "$GRAFT_NEEDED_LIST" ]; then
+    ui_print "  graft needed : none"
+  elif _mode_handles_graft; then
+    ui_print "  graft needed : none (mode-2 tolerates: $GRAFT_NEEDED_LIST)"
   else
-    ui_print "  graft needed : NO   (no chained-partition mismatches without a valid graft)"
+    ui_print "  graft needed : $GRAFT_NEEDED_LIST"
   fi
-  if [ -n "$FAKELOCK_NEEDED_LIST" ]; then
-    ui_print "  fakelock req : YES — $FAKELOCK_NEEDED_LIST"
+
+  # Render the fakelock line, mode-aware.
+  if [ -z "$FAKELOCK_NEEDED_LIST" ]; then
+    ui_print "  fakelock req : none"
+  elif _mode_handles_fakelock; then
+    ui_print "  fakelock req : none (mode-2 tolerates: $FAKELOCK_NEEDED_LIST)"
   else
-    ui_print "  fakelock req : NO   (no direct-hash mismatches in main vbmeta)"
+    ui_print "  fakelock req : $FAKELOCK_NEEDED_LIST"
   fi
 }
 
-# ----- logfs history ----------------------------------------------------
+# ----- logfs blob ------------------------------------------------------
 
+# Capture the raw logfs partition for off-device inspection. We use the
+# uefilog rotation mechanism for the durable copies; the on-screen "N prior
+# boots" tally was noise (operator can't act on it pre-reboot) and is gone.
 collect_logfs() {
   _dev=$(byname logfs)
   if [ -z "$_dev" ]; then
-    ui_print "  logfs history: NO logfs partition"
     : > "$BUNDLE_DIR/logfs.img"
     return
   fi
   dd if="$_dev" of="$BUNDLE_DIR/logfs.img" bs=1M 2>/dev/null
-  LOGFS_HISTORY=$(grep -aoE 'GblChainload_Boot[0-9]+\.txt' "$BUNDLE_DIR/logfs.img" 2>/dev/null \
-    | sort -u | wc -l | tr -d ' ')
-  LOGFS_NEWEST=$(grep -aoE 'GblChainload_Boot[0-9]+\.txt' "$BUNDLE_DIR/logfs.img" 2>/dev/null \
-    | sort -u \
-    | awk 'match($0, /[0-9]+/) { print substr($0, RSTART, RLENGTH)+0, $0 }' \
-    | sort -n -k1,1 \
-    | tail -1 \
-    | awk '{print $2}')
-  if [ "$LOGFS_HISTORY" -gt 0 ] 2>/dev/null; then
-    ui_print "  logfs history: $LOGFS_HISTORY prior gbl-chainload boots (newest: $LOGFS_NEWEST)"
-  else
-    ui_print "  logfs history: no prior gbl-chainload boots recorded"
-  fi
 }
 
 # ----- confidence tier --------------------------------------------------
@@ -248,17 +290,47 @@ decide_tier() {
 
 # ----- finalize --------------------------------------------------------
 
+# tar from $BUNDLE_WORKDIR into $BUNDLE_TGZ. On success, emit the
+# `bundle saved` UI line (which also tees into report.txt INSIDE the
+# bundle) and then remove the working dir — the tarball is the
+# persistent artifact. On gzip-absent fallback we still remove the dir
+# (plain .tar has the data). Only when tar itself fails do we leave
+# the directory intact as a last resort.
+#
+# Ordering note: the ui_print MUST happen before the rm -rf, because
+# ui_print appends to $BUNDLE_DIR/report.txt and that file needs to
+# make it into the tarball... except by the time we get here the
+# tarball is already sealed. Resolution: re-tar after the final
+# ui_print so report.txt's `bundle saved` line lands inside the
+# archive. The double-tar is cheap (the bundle is tens of MiB at
+# worst) and gives the operator a self-documenting artifact.
+#
+# We use `tar -C` (not a subshell `cd`) so $BUNDLE_TGZ works whether
+# the caller passed an absolute or relative path.
+_seal_tar_gz() {
+  tar -czf "$BUNDLE_TGZ" -C "$BUNDLE_WORKDIR" "$(basename "$BUNDLE_DIR")" 2>/dev/null
+}
+_seal_tar_plain() {
+  tar -cf  "$BUNDLE_TAR" -C "$BUNDLE_WORKDIR" "$(basename "$BUNDLE_DIR")" 2>/dev/null
+}
+
 finalize_bundle() {
-  if (cd "$BUNDLE_ROOT" && tar -czf "$(basename "$BUNDLE_TGZ")" "$(basename "$BUNDLE_DIR")") 2>/dev/null; then
+  if _seal_tar_gz; then
+    ui_print "  bundle saved : $BUNDLE_TGZ"
+    _seal_tar_gz                       # re-seal so the just-printed line lands inside
+    rm -rf "$BUNDLE_DIR"
     return
   fi
   BUNDLE_TAR="${BUNDLE_TGZ%.gz}"
-  if (cd "$BUNDLE_ROOT" && tar -cf "$(basename "$BUNDLE_TAR")" "$(basename "$BUNDLE_DIR")") 2>/dev/null; then
+  if _seal_tar_plain; then
     BUNDLE_TGZ="$BUNDLE_TAR"
     ui_print "  (gzip absent — plain tar saved instead)"
+    ui_print "  bundle saved : $BUNDLE_TGZ"
+    _seal_tar_plain                    # re-seal so the just-printed lines land inside
+    rm -rf "$BUNDLE_DIR"
     return
   fi
-  ui_print "  (tar creation failed — directory at $BUNDLE_DIR/ is intact)"
+  ui_print "  (tar creation failed — working dir at $BUNDLE_DIR/ left intact)"
 }
 
 # ----- entry point ------------------------------------------------------
@@ -271,10 +343,8 @@ mode_main() {
   collect_abl
   collect_vbmeta
   check_graft
-  collect_logfs
+  collect_logfs                  # captures logfs.img into the bundle; no UI
   ui_print "  confidence   : $(decide_tier)"
   ui_print ""
-  finalize_bundle
-  ui_print "  bundle saved : $BUNDLE_TGZ"
-  ui_print "                 directory:  $BUNDLE_DIR/"
+  finalize_bundle                # emits the `bundle saved` line itself
 }
