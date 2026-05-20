@@ -19,8 +19,17 @@ GBLP1_OK=0              # 1 if gblp1-inspect ended with result: ok
 BASE_EFI_MODE=""        # mode-0 / mode-1 / mode-2 / unknown
 LOADER_PATH_A=0         # 1 if abl_a retains loader path
 LOADER_PATH_B=0         # 1 if abl_b retains loader path
-GRAFT_NEEDED_LIST=""    # space-separated partitions with chain mismatches (graft=missing)
-FAKELOCK_NEEDED_LIST="" # space-separated partitions with direct-hash mismatches (graft=n/a)
+# Two buckets out of `vbmeta-graft list-hash`, populated in check_graft.
+# Chain bucket = the AOSP first-stage init boot-blocker set: AvbFooter
+#   missing OR vbmeta sig won't verify against the OEM chain key
+#   (graft=no_vbmeta / graft=key_mismatch). Only mode-2 (orange-state)
+#   tolerates this — mode-1's patch10 reaches ABL libavb but NOT the
+#   userspace init re-verify (vbmeta-graft-vs-construct.md §2b).
+# Hash bucket  = direct hash descriptors in main vbmeta with content-vs-
+#   digest mismatch. mode-1's patch10 + init's locked-state vbmeta skim
+#   tolerate it; only mode-0 treats it as a blocker.
+CHAIN_BROKEN_LIST=""
+HASH_MISMATCH_LIST=""
 
 # ----- bundle plumbing ------------------------------------------------
 
@@ -189,62 +198,68 @@ collect_vbmeta() {
   fi
 }
 
-# Decide whether a graft (chain-partition) mismatch needs operator action
-# given the installed chainload mode. Mode-2 keeps ABL honest (orange-state
-# boot) so chain-vbmeta-footer mismatches pass through under AVB's
-# unverified-but-allowed path; mode-0 / mode-1 / unknown need real graft.
-_mode_handles_graft() {
-  [ "$BASE_EFI_MODE" = "mode-2" ]
-}
-
-# Decide whether a direct-hash mismatch in main vbmeta needs fakelock.
-# Mode-2 patches the KM/SPSS RoT downstream at the TA boundary, so a
-# vbmeta-stage hash mismatch surfacing as orange state to ABL/KM is fine.
-# Mode-1's fakelock targets the QCOM_VERIFIEDBOOT_PROTOCOL view which is
-# *downstream* of AVB hash verification — the hash mismatch itself would
-# still trip AVB, so install-time intervention is still required.
-_mode_handles_fakelock() {
-  [ "$BASE_EFI_MODE" = "mode-2" ]
-}
-
 check_graft() {
   if [ ! -f "$BUNDLE_DIR/vbmeta_$SLOT.img" ]; then
-    ui_print "  graft needed : unknown (no active vbmeta)"
-    ui_print "  fakelock req : unknown (no active vbmeta)"
+    ui_print "  action req   : unknown (no active vbmeta)"
     : > "$BUNDLE_DIR/graft-verdict.txt"
     return
   fi
   GBL_VBMETA_SLOT="$SLOT" vbmeta-graft list-hash \
     "$BUNDLE_DIR/vbmeta_$SLOT.img" "$BYNAME" > "$BUNDLE_DIR/graft-verdict.txt" 2>&1 || true
 
-  # Bucket mismatches: graft=missing -> chain-partition vbmeta missing
-  # (needs graft mode under a no-runtime-mitigation chainload).
-  #                    graft=n/a    -> direct-hash mismatch in main vbmeta
-  # (needs fakelock).  graft-verdict.txt in the bundle has the raw rows.
-  GRAFT_NEEDED_LIST=$(awk '/verdict=mismatch/ && /graft=missing/ {
+  # Bucket the rows. vbmeta-graft list-hash emits, per descriptor:
+  #   chain  partition: graft=ok|key_mismatch|no_vbmeta  verdict=match|mismatch
+  #   hash   partition: digest=ok|mismatch               verdict=match|mismatch
+  #
+  # The chain bucket holds AOSP-init boot-blockers (no_vbmeta = init returns
+  # ok_not_signed; key_mismatch = init's libavb sig-verify rejects). The hash
+  # bucket holds direct-digest mismatches in main vbmeta.
+  CHAIN_BROKEN_LIST=$(awk '/type=chain/ && (/graft=no_vbmeta/ || /graft=key_mismatch/) {
     for(i=1;i<=NF;i++) if($i ~ /^partition=/) {split($i,a,"="); printf "%s ",a[2]}
   }' "$BUNDLE_DIR/graft-verdict.txt" | sed 's/ $//')
-  FAKELOCK_NEEDED_LIST=$(awk '/verdict=mismatch/ && /graft=n\/a/ {
+  HASH_MISMATCH_LIST=$(awk '/type=hash/ && /digest=mismatch/ {
     for(i=1;i<=NF;i++) if($i ~ /^partition=/) {split($i,a,"="); printf "%s ",a[2]}
   }' "$BUNDLE_DIR/graft-verdict.txt" | sed 's/ $//')
 
-  # Render the graft line, mode-aware.
-  if [ -z "$GRAFT_NEEDED_LIST" ]; then
-    ui_print "  graft needed : none"
-  elif _mode_handles_graft; then
-    ui_print "  graft needed : none (mode-2 tolerates: $GRAFT_NEEDED_LIST)"
-  else
-    ui_print "  graft needed : $GRAFT_NEEDED_LIST"
-  fi
-
-  # Render the fakelock line, mode-aware.
-  if [ -z "$FAKELOCK_NEEDED_LIST" ]; then
-    ui_print "  fakelock req : none"
-  elif _mode_handles_fakelock; then
-    ui_print "  fakelock req : none (mode-2 tolerates: $FAKELOCK_NEEDED_LIST)"
-  else
-    ui_print "  fakelock req : $FAKELOCK_NEEDED_LIST"
-  fi
+  # Render the action line, mode-aware:
+  #   mode-2   — orange-state AVB tolerates everything → always 'none'
+  #   mode-1   — chain bucket is fatal; hash bucket is fine (patch10 +
+  #              init's locked-state skim)
+  #   mode-0   — both buckets fatal; surface both
+  #   unknown  — use mode-1 framing (most common pre-MANIFEST-fix) with
+  #              an explicit caveat suffix
+  case "$BASE_EFI_MODE" in
+    mode-2)
+      ui_print "  action req   : none"
+      ;;
+    mode-1)
+      if [ -z "$CHAIN_BROKEN_LIST" ]; then
+        ui_print "  action req   : none"
+      else
+        ui_print "  action req   : graft $CHAIN_BROKEN_LIST"
+      fi
+      ;;
+    mode-0)
+      _parts=""
+      [ -n "$CHAIN_BROKEN_LIST"  ] && _parts="graft $CHAIN_BROKEN_LIST"
+      if [ -n "$HASH_MISMATCH_LIST" ]; then
+        [ -n "$_parts" ] && _parts="$_parts; "
+        _parts="${_parts}hash $HASH_MISMATCH_LIST"
+      fi
+      [ -z "$_parts" ] && _parts="none"
+      ui_print "  action req   : $_parts"
+      ;;
+    *)
+      # unknown-base — base-EFI fingerprint didn't match MANIFEST. Frame
+      # using mode-1 semantics (the dominant pre-release-workflow case)
+      # and tell the operator so.
+      if [ -z "$CHAIN_BROKEN_LIST" ]; then
+        ui_print "  action req   : none (mode unknown — assumed mode-1)"
+      else
+        ui_print "  action req   : graft $CHAIN_BROKEN_LIST (mode unknown — assumed mode-1)"
+      fi
+      ;;
+  esac
 }
 
 # ----- logfs blob ------------------------------------------------------
