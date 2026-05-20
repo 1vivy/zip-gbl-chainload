@@ -23,6 +23,11 @@ ui_print" >> /proc/self/fd/"$OUTFD"
 }
 abort() { ui_print "ABORT: $1"; exit 1; }
 
+# --- gbl-chainload version banner (substituted at zip build time) ---
+ui_print "----------------------------------------"
+ui_print "gbl-chainload v__GBL_VERSION__"
+ui_print "----------------------------------------"
+
 # --- unpack ourselves into a private scratch dir ---
 WORKDIR=/tmp/gbl-zip.$$
 # Minimal cleanup trap, armed before mkdir/unzip so a bootstrap failure
