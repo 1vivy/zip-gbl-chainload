@@ -207,7 +207,11 @@ collect_logfs() {
   LOGFS_HISTORY=$(grep -aoE 'GblChainload_Boot[0-9]+\.txt' "$BUNDLE_DIR/logfs.img" 2>/dev/null \
     | sort -u | wc -l | tr -d ' ')
   LOGFS_NEWEST=$(grep -aoE 'GblChainload_Boot[0-9]+\.txt' "$BUNDLE_DIR/logfs.img" 2>/dev/null \
-    | sort -t'_' -k3 -n | tail -1)
+    | sort -u \
+    | awk 'match($0, /[0-9]+/) { print substr($0, RSTART, RLENGTH)+0, $0 }' \
+    | sort -n -k1,1 \
+    | tail -1 \
+    | awk '{print $2}')
   if [ "$LOGFS_HISTORY" -gt 0 ] 2>/dev/null; then
     ui_print "  logfs history: $LOGFS_HISTORY prior gbl-chainload boots (newest: $LOGFS_NEWEST)"
   else
@@ -245,8 +249,16 @@ decide_tier() {
 # ----- finalize --------------------------------------------------------
 
 finalize_bundle() {
-  (cd "$BUNDLE_ROOT" && tar -czf "$(basename "$BUNDLE_TGZ")" "$(basename "$BUNDLE_DIR")") 2>/dev/null \
-    || ui_print "  (tar.gz creation failed — directory at $BUNDLE_DIR/ is intact)"
+  if (cd "$BUNDLE_ROOT" && tar -czf "$(basename "$BUNDLE_TGZ")" "$(basename "$BUNDLE_DIR")") 2>/dev/null; then
+    return
+  fi
+  BUNDLE_TAR="${BUNDLE_TGZ%.gz}"
+  if (cd "$BUNDLE_ROOT" && tar -cf "$(basename "$BUNDLE_TAR")" "$(basename "$BUNDLE_DIR")") 2>/dev/null; then
+    BUNDLE_TGZ="$BUNDLE_TAR"
+    ui_print "  (gzip absent — plain tar saved instead)"
+    return
+  fi
+  ui_print "  (tar creation failed — directory at $BUNDLE_DIR/ is intact)"
 }
 
 # ----- entry point ------------------------------------------------------
