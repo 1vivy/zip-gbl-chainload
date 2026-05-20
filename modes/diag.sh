@@ -19,17 +19,19 @@ GBLP1_OK=0              # 1 if gblp1-inspect ended with result: ok
 BASE_EFI_MODE=""        # mode-0 / mode-1 / mode-2 / unknown
 LOADER_PATH_A=0         # 1 if abl_a retains loader path
 LOADER_PATH_B=0         # 1 if abl_b retains loader path
-# Two buckets out of `vbmeta-graft list-hash`, populated in check_graft.
-# Chain bucket = the AOSP first-stage init boot-blocker set: AvbFooter
-#   missing OR vbmeta sig won't verify against the OEM chain key
-#   (graft=no_vbmeta / graft=key_mismatch). Only mode-2 (orange-state)
-#   tolerates this — mode-1's patch10 reaches ABL libavb but NOT the
-#   userspace init re-verify (vbmeta-graft-vs-construct.md §2b).
-# Hash bucket  = direct hash descriptors in main vbmeta with content-vs-
-#   digest mismatch. mode-1's patch10 + init's locked-state vbmeta skim
-#   tolerate it; only mode-0 treats it as a blocker.
+# Chain-broken bucket out of `vbmeta-graft list-hash`, populated in
+# check_graft. This is the AOSP first-stage init boot-blocker set:
+# AvbFooter missing OR vbmeta sig won't verify against the OEM chain key
+# (graft=no_vbmeta / graft=key_mismatch). Only mode-1 surfaces it on
+# the UI — mode-0 / mode-2 keep ABL honest about unlock state so
+# AVB's allow_verification_error=true tolerates everything; mode-1's
+# patch10 reaches ABL libavb but NOT the userspace init re-verify
+# (vbmeta-graft-vs-construct.md §2b). The hash bucket (digest=mismatch
+# rows) is tolerated by every installed mode (mode-1 via patch10 +
+# init's locked-state vbmeta skim) so we don't bother computing or
+# rendering it — graft-verdict.txt in the bundle has the raw rows for
+# anyone who wants them.
 CHAIN_BROKEN_LIST=""
-HASH_MISMATCH_LIST=""
 
 # ----- bundle plumbing ------------------------------------------------
 
@@ -207,17 +209,14 @@ check_graft() {
   GBL_VBMETA_SLOT="$SLOT" vbmeta-graft list-hash \
     "$BUNDLE_DIR/vbmeta_$SLOT.img" "$BYNAME" > "$BUNDLE_DIR/graft-verdict.txt" 2>&1 || true
 
-  # Bucket the rows. vbmeta-graft list-hash emits, per descriptor:
-  #   chain  partition: graft=ok|key_mismatch|no_vbmeta  verdict=match|mismatch
-  #   hash   partition: digest=ok|mismatch               verdict=match|mismatch
-  #
-  # The chain bucket holds AOSP-init boot-blockers (no_vbmeta = init returns
-  # ok_not_signed; key_mismatch = init's libavb sig-verify rejects). The hash
-  # bucket holds direct-digest mismatches in main vbmeta.
+  # Pull AOSP-init boot-blocker rows from `vbmeta-graft list-hash`:
+  # chain partitions whose AvbFooter is absent (no_vbmeta → init returns
+  # ok_not_signed) or whose embedded vbmeta won't sig-verify against the
+  # chain descriptor's OEM pubkey (key_mismatch → init libavb rejects).
+  # Hash-descriptor rows (`type=hash digest=mismatch`) are NOT extracted:
+  # every installed mode tolerates them. The raw per-row data lives in
+  # `graft-verdict.txt` in the bundle.
   CHAIN_BROKEN_LIST=$(awk '/type=chain/ && (/graft=no_vbmeta/ || /graft=key_mismatch/) {
-    for(i=1;i<=NF;i++) if($i ~ /^partition=/) {split($i,a,"="); printf "%s ",a[2]}
-  }' "$BUNDLE_DIR/graft-verdict.txt" | sed 's/ $//')
-  HASH_MISMATCH_LIST=$(awk '/type=hash/ && /digest=mismatch/ {
     for(i=1;i<=NF;i++) if($i ~ /^partition=/) {split($i,a,"="); printf "%s ",a[2]}
   }' "$BUNDLE_DIR/graft-verdict.txt" | sed 's/ $//')
 
@@ -301,44 +300,58 @@ decide_tier() {
 
 # ----- finalize --------------------------------------------------------
 
-# tar from $BUNDLE_WORKDIR into $BUNDLE_TGZ. On success, emit the
-# `bundle saved` UI line (which also tees into report.txt INSIDE the
-# bundle) and then remove the working dir — the tarball is the
-# persistent artifact. On gzip-absent fallback we still remove the dir
-# (plain .tar has the data). Only when tar itself fails do we leave
-# the directory intact as a last resort.
+# Seal the working dir into $BUNDLE_TGZ, emit the `bundle saved` UI line
+# (which tees into report.txt inside the bundle), then remove the
+# working dir. The tarball is the persistent artifact.
 #
-# Ordering note: the ui_print MUST happen before the rm -rf, because
-# ui_print appends to $BUNDLE_DIR/report.txt and that file needs to
-# make it into the tarball... except by the time we get here the
-# tarball is already sealed. Resolution: re-tar after the final
-# ui_print so report.txt's `bundle saved` line lands inside the
-# archive. The double-tar is cheap (the bundle is tens of MiB at
-# worst) and gives the operator a self-documenting artifact.
+# Ordering trick: `ui_print` appends to $BUNDLE_DIR/report.txt, so the
+# `bundle saved` line only lands inside the archive if we tar AFTER
+# printing it. We do that, but write the re-seal to $BUNDLE_TGZ.tmp and
+# atomic-mv it into place. Two failure modes that an in-place re-tar
+# couldn't handle cleanly are then both safe:
+#   1. Re-seal fails (rare — ENOSPC mid-stream, signal, IO error) →
+#      the first-seal .tar.gz is untouched and the working dir is kept
+#      for retry. No corrupt artifact is left under $BUNDLE_TGZ.
+#   2. Operator pulls $BUNDLE_TGZ mid-run → never sees a half-written
+#      archive (mv is atomic on the same filesystem).
+# Only when the first seal itself fails do we leave the working dir as
+# the last resort.
 #
-# We use `tar -C` (not a subshell `cd`) so $BUNDLE_TGZ works whether
-# the caller passed an absolute or relative path.
-_seal_tar_gz() {
-  tar -czf "$BUNDLE_TGZ" -C "$BUNDLE_WORKDIR" "$(basename "$BUNDLE_DIR")" 2>/dev/null
+# `tar -C` (not a subshell `cd`) so $BUNDLE_TGZ works whether the
+# caller passed an absolute or relative path.
+_seal_tar_gz_to() {  # $1 = output path
+  tar -czf "$1" -C "$BUNDLE_WORKDIR" "$(basename "$BUNDLE_DIR")" 2>/dev/null
 }
-_seal_tar_plain() {
-  tar -cf  "$BUNDLE_TAR" -C "$BUNDLE_WORKDIR" "$(basename "$BUNDLE_DIR")" 2>/dev/null
+_seal_tar_plain_to() {  # $1 = output path
+  tar -cf  "$1" -C "$BUNDLE_WORKDIR" "$(basename "$BUNDLE_DIR")" 2>/dev/null
 }
 
 finalize_bundle() {
-  if _seal_tar_gz; then
+  if _seal_tar_gz_to "$BUNDLE_TGZ"; then
     ui_print "  bundle saved : $BUNDLE_TGZ"
-    _seal_tar_gz                       # re-seal so the just-printed line lands inside
-    rm -rf "$BUNDLE_DIR"
+    if _seal_tar_gz_to "$BUNDLE_TGZ.tmp"; then
+      mv "$BUNDLE_TGZ.tmp" "$BUNDLE_TGZ"
+      rm -rf "$BUNDLE_DIR"
+    else
+      rm -f "$BUNDLE_TGZ.tmp"
+      ui_print "  (re-seal failed — original .tar.gz intact but missing"
+      ui_print "   the 'bundle saved' line; $BUNDLE_DIR kept for retry)"
+    fi
     return
   fi
   BUNDLE_TAR="${BUNDLE_TGZ%.gz}"
-  if _seal_tar_plain; then
+  if _seal_tar_plain_to "$BUNDLE_TAR"; then
     BUNDLE_TGZ="$BUNDLE_TAR"
     ui_print "  (gzip absent — plain tar saved instead)"
     ui_print "  bundle saved : $BUNDLE_TGZ"
-    _seal_tar_plain                    # re-seal so the just-printed lines land inside
-    rm -rf "$BUNDLE_DIR"
+    if _seal_tar_plain_to "$BUNDLE_TGZ.tmp"; then
+      mv "$BUNDLE_TGZ.tmp" "$BUNDLE_TGZ"
+      rm -rf "$BUNDLE_DIR"
+    else
+      rm -f "$BUNDLE_TGZ.tmp"
+      ui_print "  (re-seal failed — original .tar intact but missing"
+      ui_print "   the 'bundle saved' line; $BUNDLE_DIR kept for retry)"
+    fi
     return
   fi
   ui_print "  (tar creation failed — working dir at $BUNDLE_DIR/ left intact)"
