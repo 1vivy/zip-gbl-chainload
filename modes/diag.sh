@@ -222,14 +222,23 @@ check_graft() {
   }' "$BUNDLE_DIR/graft-verdict.txt" | sed 's/ $//')
 
   # Render the action line, mode-aware:
-  #   mode-2   — orange-state AVB tolerates everything → always 'none'
-  #   mode-1   — chain bucket is fatal; hash bucket is fine (patch10 +
-  #              init's locked-state skim)
-  #   mode-0   — both buckets fatal; surface both
-  #   unknown  — use mode-1 framing (most common pre-MANIFEST-fix) with
-  #              an explicit caveat suffix
+  #   mode-0 / mode-2 — ABL stays honest about unlock state, so libavb's
+  #                     allow_verification_error=true tolerates every
+  #                     descriptor-level outcome. mode-0 is pure
+  #                     debug-observation (no KM rewrite) and mode-2
+  #                     additionally fixes attestation at the TA layer;
+  #                     neither has any AVB-related boot blocker.
+  #   mode-1          — patch10 covers ABL libavb but NOT AOSP init's
+  #                     userspace re-verify. init skims the on-disk
+  #                     vbmeta (sig must verify; content hashes are not
+  #                     re-checked under locked-presenting state), so
+  #                     chain-broken rows are blockers and hash bucket
+  #                     is tolerated.
+  #   unknown         — base-EFI fingerprint didn't match MANIFEST.
+  #                     Frame using mode-1 semantics (the dominant
+  #                     pre-release-workflow case) and disclose so.
   case "$BASE_EFI_MODE" in
-    mode-2)
+    mode-0|mode-2)
       ui_print "  action req   : none"
       ;;
     mode-1)
@@ -239,20 +248,7 @@ check_graft() {
         ui_print "  action req   : graft $CHAIN_BROKEN_LIST"
       fi
       ;;
-    mode-0)
-      _parts=""
-      [ -n "$CHAIN_BROKEN_LIST"  ] && _parts="graft $CHAIN_BROKEN_LIST"
-      if [ -n "$HASH_MISMATCH_LIST" ]; then
-        [ -n "$_parts" ] && _parts="$_parts; "
-        _parts="${_parts}hash $HASH_MISMATCH_LIST"
-      fi
-      [ -z "$_parts" ] && _parts="none"
-      ui_print "  action req   : $_parts"
-      ;;
     *)
-      # unknown-base — base-EFI fingerprint didn't match MANIFEST. Frame
-      # using mode-1 semantics (the dominant pre-release-workflow case)
-      # and tell the operator so.
       if [ -z "$CHAIN_BROKEN_LIST" ]; then
         ui_print "  action req   : none (mode unknown — assumed mode-1)"
       else
