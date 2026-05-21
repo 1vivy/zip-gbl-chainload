@@ -1,13 +1,15 @@
 # shellcheck shell=sh
-# shellcheck disable=SC2154,SC2015,SC2153
+# shellcheck disable=SC2154,SC2015,SC2153,SC2034
 # SC2153: STEP/STEPS in _step are set by modes/install-common.sh's mode_main.
 # core/install_abl.sh — partition/slot-generic loader-ABL machinery.
 # Sourced by update-binary. Shared by the mode-N-install modes (via
 # modes/install-common.sh).
 # Functions: vol_key, abl_marker, pick_scenario, resolve_restore_source,
-#            restore_abl, save_backup_abl, _step. Constant: BACKUP.
+#            restore_abl, save_backup_abl, _step. Constants: BACKUP,
+#            CACHE_BACKUP.
 
-BACKUP=/sdcard/backup_abl.img
+BACKUP=$GBL_BACKUP_DIR/backup_abl.img
+CACHE_BACKUP=$GBL_BACKUP_DIR/latest_abl.img
 
 # _step <message> -> advance the [N/STEPS] counter and announce the step.
 # STEP/STEPS are the running install counter set by modes/install-common.sh's
@@ -15,12 +17,11 @@ BACKUP=/sdcard/backup_abl.img
 # the mode-N-install bodies all see it.
 _step() { STEP=$((STEP + 1)); ui_print "[$STEP/$STEPS] $1"; }
 
-# vol_key <timeout-seconds> -> echoes UP | DOWN | TIMEOUT.
-# -lqc 200: read enough events that the key press is not missed amid
-# unrelated input (a press is paired down/up + EV_SYN, plus other input
-# devices); grep -m1 stops getevent at the first vol-key match.
+# vol_key -> echoes UP | DOWN | TIMEOUT.
+# Prompting intentionally has no timeout: recovery installs should wait for an
+# explicit choice, while BOOTMODE/update_engine paths avoid prompts entirely.
 vol_key() {
-  _k=$(timeout "$1" getevent -lqc 200 2>/dev/null \
+  _k=$(getevent -lq 2>/dev/null \
          | grep -m1 -oE 'KEY_(VOLUMEUP|VOLUMEDOWN)' || true)
   case "$_k" in
     KEY_VOLUMEUP)   echo UP ;;
@@ -52,9 +53,12 @@ pick_scenario() {
     ui_print "[*] update_engine postinstall detected - OTA install"
   else
     ui_print "Which install is this?"
-    ui_print "  Vol-UP   = OTA install (an OTA was just flashed)"
-    ui_print "  Vol-DOWN = re-install gbl-chainload   (no key in 10s = re-install)"
-    case "$(vol_key 10)" in
+    ui_print "  Vol-UP   = OTA install: ROM/OTA was just flashed; target inactive slot"
+    ui_print "  Vol-DOWN = reinstall/repair current slot"
+    ui_print "  First-time active-slot installs: choose reinstall/repair after loading"
+    ui_print "  custom recovery for this slot. OTA recovery retention is automatic only"
+    ui_print "  for the OTA/inactive-slot pathway."
+    case "$(vol_key)" in
       UP) SCENARIO=ota ;;
       *)  SCENARIO=reinstall ;;
     esac
@@ -63,10 +67,11 @@ pick_scenario() {
   ui_print "[*] scenario=$SCENARIO  target slot=$TARGET"
 }
 
-# resolve_restore_source -> sets RESTORE_SRC and SAVED_FROM_BACKUP.
+# resolve_restore_source -> sets RESTORE_SRC, SAVED_FROM_BACKUP, RESTORE_SKIP.
 # Candidate X = the active-slot ABL; exploit-check it; P3 prompt; fall to
-# /sdcard/backup_abl.img; abort if no vulnerable source exists.
+# $BACKUP; abort if no vulnerable source exists.
 resolve_restore_source() {
+  RESTORE_SKIP=false
   ui_print "[*] checking active-slot ABL (abl_$SLOT) for the GBL loader path"
   dd if="$ACTIVE_DEV" of="$WORKDIR/active_abl.img" bs=1M 2>/dev/null \
     || abort "failed to read abl_$SLOT"
@@ -78,6 +83,15 @@ resolve_restore_source() {
     ui_print "    active-slot ABL: NOT vulnerable"
   fi
 
+  if [ "$SCENARIO" = reinstall ]; then
+    $_xvuln || abort "active-slot ABL is not vulnerable; reinstall/repair cannot restore abl_$SLOT to itself"
+    RESTORE_SRC="$WORKDIR/active_abl.img"
+    SAVED_FROM_BACKUP=false
+    RESTORE_SKIP=true
+    ui_print "[*] active-slot ABL already provides the loader path; no ABL write needed"
+    return 0
+  fi
+
   if $_xvuln; then
     if $BOOTMODE; then
       if [ -f "$BACKUP" ]; then
@@ -87,21 +101,21 @@ resolve_restore_source() {
       fi
     else
       ui_print "Restore the active-slot ABL to abl_$TARGET? (confirmed vulnerable)"
-      ui_print "  Vol-UP = yes   Vol-DOWN = use /sdcard/backup_abl.img instead"
-      case "$(vol_key 10)" in
+      ui_print "  Vol-UP = yes   Vol-DOWN = use $BACKUP instead"
+      case "$(vol_key)" in
         DOWN) RESTORE_SRC="$BACKUP" ;;
         *)    RESTORE_SRC="$WORKDIR/active_abl.img" ;;
       esac
     fi
   else
-    ui_print "[*] active-slot ABL not vulnerable - using /sdcard/backup_abl.img"
+    ui_print "[*] active-slot ABL not vulnerable - using $BACKUP"
     RESTORE_SRC="$BACKUP"
   fi
 
   if [ "$RESTORE_SRC" = "$BACKUP" ]; then
-    [ -f "$BACKUP" ] || abort "no vulnerable restore source: /sdcard/backup_abl.img is missing"
+    [ -f "$BACKUP" ] || abort "no vulnerable restore source: $BACKUP is missing"
     [ "$(abl_marker "$BACKUP" "$WORKDIR/backup_pe.efi")" = present ] \
-      || abort "/sdcard/backup_abl.img is not a vulnerable ABL"
+      || abort "$BACKUP is not a vulnerable ABL"
     SAVED_FROM_BACKUP=true
   else
     SAVED_FROM_BACKUP=false
@@ -112,20 +126,26 @@ resolve_restore_source() {
 # restore_abl -> verified write of the restore source onto abl_<target>.
 # STEP/STEPS are the running step counter set by modes/install-common.sh.
 restore_abl() {
+  if $RESTORE_SKIP; then
+    _step "active-slot loader ABL verified; skipping ABL restore"
+    return 0
+  fi
   _step "restoring loader ABL to abl_$TARGET (backup + verify)"
-  commit_verified "$RESTORE_SRC" "$TARGET_DEV" "/sdcard/abl_$TARGET.bak"
+  commit_verified "$RESTORE_SRC" "$TARGET_DEV" "$GBL_BACKUP_DIR/abl_$TARGET.img"
 }
 
-# save_backup_abl -> P4: offer to save the exploit ABL to /sdcard/backup_abl.img.
+# save_backup_abl -> P4: offer to save the exploit ABL to $BACKUP.
 save_backup_abl() {
   $SAVED_FROM_BACKUP && return 0
   if $BOOTMODE; then
     [ -f "$BACKUP" ] && return 0
+    mkdir -p "$GBL_BACKUP_DIR" || abort "cannot create $GBL_BACKUP_DIR"
     cp "$RESTORE_SRC" "$BACKUP" && ui_print "[*] saved exploit ABL to $BACKUP"
   else
-    ui_print "Save the exploit ABL just used to /sdcard/backup_abl.img?"
-    ui_print "  Vol-UP = yes, else skip"
-    if [ "$(vol_key 10)" = UP ]; then
+    ui_print "Save the exploit ABL just used to $BACKUP?"
+    ui_print "  Vol-UP = yes   Vol-DOWN = skip"
+    if [ "$(vol_key)" = UP ]; then
+      mkdir -p "$GBL_BACKUP_DIR" || abort "cannot create $GBL_BACKUP_DIR"
       cp "$RESTORE_SRC" "$BACKUP" && ui_print "[*] saved exploit ABL to $BACKUP"
     fi
   fi

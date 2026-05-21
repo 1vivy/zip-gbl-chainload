@@ -1,5 +1,5 @@
 # shellcheck shell=sh
-# shellcheck disable=SC2154,SC2012
+# shellcheck disable=SC2154,SC2012,SC2034
 # modes/diag.sh — pre-reboot EFISP-install state check + state-bundle.
 # Zero device writes. Stages a working dir at $BUNDLE_WORKDIR (default
 # /tmp — recovery tmpfs, lost on reboot) and produces a single

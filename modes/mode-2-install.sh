@@ -24,8 +24,8 @@ M_EFI=mode-2.efi
 M_LABEL=mode-2-install
 M_WANT_PROFILE=1
 
-STOCK_VBMETA=/sdcard/stock_vbmeta.img
-PROFILE_TOML=/sdcard/gbl-chainload_profile.toml
+STOCK_VBMETA=$GBL_STATE_DIR/mode-2/stock_vbmeta.img
+PROFILE_TOML=$GBL_STATE_DIR/mode-2/profile.toml
 
 # detect_oem -> sets OEM_ID from the device's product manufacturer. Aborts on
 # an unsupported OEM.

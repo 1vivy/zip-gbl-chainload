@@ -22,7 +22,7 @@
 #                  gbl-chainload.
 #
 # Loader-ABL machinery (vol_key, abl_marker, pick_scenario,
-# resolve_restore_source, restore_abl, save_backup_abl, BACKUP) lives in
+# resolve_restore_source, restore_abl, save_backup_abl, BACKUP, CACHE_BACKUP) lives in
 # core/install_abl.sh, sourced by update-binary before this file.
 #
 # Per-mode parameters (set by the thin modes/mode-N-install.sh before sourcing,
@@ -39,6 +39,11 @@
 #   mode_prepare    runs after resolve_restore_source, before build_payload
 #                   (per-mode preparation that populates M_PATCHER_ARGS /
 #                   M_PACK_ARGS). mode-2-install.sh overrides both.
+#   mode_preinstall_write runs after payload construction, before EFISP/ABL
+#                   writes, for optional companion writes that should fail
+#                   before the boot-chain install (mode-1 OTA recovery graft).
+#   mode_postinstall runs after the loader ABL restore for final no-op/status
+#                   hooks.
 # Both hooks run AFTER pick_scenario's interactive scenario prompt — a mode
 # that wants an early abort (e.g. unsupported-OEM in mode_prepare) will still
 # pay the vol-key scenario prompt first.
@@ -51,6 +56,8 @@ mode_preflight() { :; }
 # loader-ABL source is resolved and before any payload is built; a mode that
 # needs to populate M_PATCHER_ARGS / M_PACK_ARGS overrides this.
 mode_prepare() { :; }
+mode_preinstall_write() { :; }
+mode_postinstall() { :; }
 
 # preflight -> resolves device paths and gates everything before any write.
 preflight() {
@@ -71,8 +78,20 @@ preflight() {
 # per-mode M_PATCHER_ARGS / M_PACK_ARGS appended.
 build_payload() {
   _step "caching abl_$TARGET (patch args: ${M_PATCHER_ARGS:-none})"
-  dd if="$TARGET_DEV" of="$WORKDIR/cache_abl.img" bs=1M 2>/dev/null \
-    || abort "failed to read abl_$TARGET"
+  if [ "$SCENARIO" = reinstall ] && [ -f "$CACHE_BACKUP" ]; then
+    ui_print "[*] using saved latest ABL cache source: $CACHE_BACKUP"
+    cp "$CACHE_BACKUP" "$WORKDIR/cache_abl.img" \
+      || abort "failed to copy $CACHE_BACKUP"
+  else
+    dd if="$TARGET_DEV" of="$WORKDIR/cache_abl.img" bs=1M 2>/dev/null \
+      || abort "failed to read abl_$TARGET"
+    if [ "$SCENARIO" = ota ]; then
+      mkdir -p "$GBL_BACKUP_DIR" || abort "cannot create $GBL_BACKUP_DIR"
+      cp "$WORKDIR/cache_abl.img" "$CACHE_BACKUP" \
+        || abort "failed to save latest ABL cache source to $CACHE_BACKUP"
+      ui_print "[*] saved latest ABL cache source to $CACHE_BACKUP"
+    fi
+  fi
   fv-unwrap "$WORKDIR/cache_abl.img" "$WORKDIR/extracted.efi" >/dev/null 2>&1 \
     || abort "fv-unwrap failed on the cache-source ABL"
   # M_PATCHER_ARGS / M_PACK_ARGS are intentionally word-split.
@@ -94,7 +113,7 @@ build_payload() {
 # commit_efisp -> verified write of installed.efi onto EFISP.
 commit_efisp() {
   _step "writing EFISP (backup + verify)"
-  commit_verified "$WORKDIR/installed.efi" "$EFISP_DEV" /sdcard/efisp.bak
+  commit_verified "$WORKDIR/installed.efi" "$EFISP_DEV" "$GBL_BACKUP_DIR/efisp.img"
 }
 
 mode_main() {
@@ -106,13 +125,16 @@ mode_main() {
   STEP=0
   pick_scenario
   preflight
+  [ "${GRAFT_ENABLED:-0}" = 1 ] && STEPS=$((STEPS + 1))
   resolve_restore_source
   mode_prepare
   build_payload
+  mode_preinstall_write
   commit_efisp
   restore_abl
+  mode_postinstall
   save_backup_abl
   ui_print ""
   ui_print "$M_LABEL: done - reboot to use the cached ABL."
-  ui_print "backups kept: /sdcard/efisp.bak, /sdcard/abl_$TARGET.bak"
+  ui_print "backups kept: $GBL_BACKUP_DIR"
 }
