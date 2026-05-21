@@ -34,11 +34,19 @@ mode_preflight() {
     return 0
   fi
 
+  if ! $BOOTMODE; then
+    [ -f "$GRAFT_ROOT/recovery.img" ] \
+      || abort "first-time/reinstall mode-1 recovery install needs $GRAFT_ROOT/recovery.img"
+    ui_print "[*] first-time/reinstall recovery graft input: $GRAFT_ROOT/recovery.img"
+    graft_prepare_one recovery "$GRAFT_ROOT/recovery.img" "$TARGET"
+    return 0
+  fi
+
   if [ -f "$GRAFT_ROOT/recovery.img" ]; then
-    ui_print "[*] namespaced recovery graft input: $GRAFT_ROOT/recovery.img"
+    ui_print "[*] booted-system recovery graft input: $GRAFT_ROOT/recovery.img"
     graft_prepare_one recovery "$GRAFT_ROOT/recovery.img" "$TARGET"
   else
-    ui_print "[*] no optional graft input at $GRAFT_ROOT/recovery.img"
+    ui_print "[*] booted-system install: no recovery graft input; skipping graft"
   fi
 }
 

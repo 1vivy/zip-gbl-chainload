@@ -1,5 +1,5 @@
 # shellcheck shell=sh
-# shellcheck disable=SC2154
+# shellcheck disable=SC2154,SC2034
 # core/safety.sh — abort / cleanup / verified-write, and the EXIT trap.
 # Sourced by update-binary. See zip-methodology.md A6.
 # Plumbing patterns from AnyKernel3 (osm0sis, MIT-style license).
