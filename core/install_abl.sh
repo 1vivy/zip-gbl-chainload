@@ -1,13 +1,15 @@
 # shellcheck shell=sh
-# shellcheck disable=SC2154,SC2015,SC2153
+# shellcheck disable=SC2154,SC2015,SC2153,SC2034
 # SC2153: STEP/STEPS in _step are set by modes/install-common.sh's mode_main.
 # core/install_abl.sh — partition/slot-generic loader-ABL machinery.
 # Sourced by update-binary. Shared by the mode-N-install modes (via
 # modes/install-common.sh).
 # Functions: vol_key, abl_marker, pick_scenario, resolve_restore_source,
-#            restore_abl, save_backup_abl, _step. Constant: BACKUP.
+#            restore_abl, save_backup_abl, _step. Constants: BACKUP,
+#            CACHE_BACKUP.
 
 BACKUP=$GBL_BACKUP_DIR/backup_abl.img
+CACHE_BACKUP=$GBL_BACKUP_DIR/latest_abl.img
 
 # _step <message> -> advance the [N/STEPS] counter and announce the step.
 # STEP/STEPS are the running install counter set by modes/install-common.sh's

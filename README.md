@@ -39,6 +39,7 @@ namespace on shared storage:
     abl_<slot>.img      # pre-write ABL backup when an ABL slot is written
     recovery_<slot>.img # pre-write recovery backup when recovery is written
     backup_abl.img      # saved vulnerable/exploit ABL for later OTA installs
+    latest_abl.img      # saved OTA target ABL used as reinstall cache source
 ```
 
 `graft-candidate/recovery.img` is the recovery you want to keep or install.
@@ -91,7 +92,9 @@ using the active recovery partition, place it at:
 
 The graft, when needed, is prepared and verified before any EFISP/ABL write.
 For reinstall/repair, the active ABL is only checked for the loader path; the ZIP
-does not rewrite `abl_<active>` onto itself.
+does not rewrite `abl_<active>` onto itself. If a previous OTA install saved
+`backups/latest/latest_abl.img`, reinstall/repair uses that fresh ABL as the
+cached payload source instead of re-caching the loader ABL from the active slot.
 
 ### Booted-system / AnyKernel3-style flashing
 

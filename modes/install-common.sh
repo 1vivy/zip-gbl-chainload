@@ -22,7 +22,7 @@
 #                  gbl-chainload.
 #
 # Loader-ABL machinery (vol_key, abl_marker, pick_scenario,
-# resolve_restore_source, restore_abl, save_backup_abl, BACKUP) lives in
+# resolve_restore_source, restore_abl, save_backup_abl, BACKUP, CACHE_BACKUP) lives in
 # core/install_abl.sh, sourced by update-binary before this file.
 #
 # Per-mode parameters (set by the thin modes/mode-N-install.sh before sourcing,
@@ -78,8 +78,20 @@ preflight() {
 # per-mode M_PATCHER_ARGS / M_PACK_ARGS appended.
 build_payload() {
   _step "caching abl_$TARGET (patch args: ${M_PATCHER_ARGS:-none})"
-  dd if="$TARGET_DEV" of="$WORKDIR/cache_abl.img" bs=1M 2>/dev/null \
-    || abort "failed to read abl_$TARGET"
+  if [ "$SCENARIO" = reinstall ] && [ -f "$CACHE_BACKUP" ]; then
+    ui_print "[*] using saved latest ABL cache source: $CACHE_BACKUP"
+    cp "$CACHE_BACKUP" "$WORKDIR/cache_abl.img" \
+      || abort "failed to copy $CACHE_BACKUP"
+  else
+    dd if="$TARGET_DEV" of="$WORKDIR/cache_abl.img" bs=1M 2>/dev/null \
+      || abort "failed to read abl_$TARGET"
+    if [ "$SCENARIO" = ota ]; then
+      mkdir -p "$GBL_BACKUP_DIR" || abort "cannot create $GBL_BACKUP_DIR"
+      cp "$WORKDIR/cache_abl.img" "$CACHE_BACKUP" \
+        || abort "failed to save latest ABL cache source to $CACHE_BACKUP"
+      ui_print "[*] saved latest ABL cache source to $CACHE_BACKUP"
+    fi
+  fi
   fv-unwrap "$WORKDIR/cache_abl.img" "$WORKDIR/extracted.efi" >/dev/null 2>&1 \
     || abort "fv-unwrap failed on the cache-source ABL"
   # M_PATCHER_ARGS / M_PACK_ARGS are intentionally word-split.
