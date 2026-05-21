@@ -65,10 +65,11 @@ pick_scenario() {
   ui_print "[*] scenario=$SCENARIO  target slot=$TARGET"
 }
 
-# resolve_restore_source -> sets RESTORE_SRC and SAVED_FROM_BACKUP.
+# resolve_restore_source -> sets RESTORE_SRC, SAVED_FROM_BACKUP, RESTORE_SKIP.
 # Candidate X = the active-slot ABL; exploit-check it; P3 prompt; fall to
 # $BACKUP; abort if no vulnerable source exists.
 resolve_restore_source() {
+  RESTORE_SKIP=false
   ui_print "[*] checking active-slot ABL (abl_$SLOT) for the GBL loader path"
   dd if="$ACTIVE_DEV" of="$WORKDIR/active_abl.img" bs=1M 2>/dev/null \
     || abort "failed to read abl_$SLOT"
@@ -78,6 +79,15 @@ resolve_restore_source() {
   else
     _xvuln=false
     ui_print "    active-slot ABL: NOT vulnerable"
+  fi
+
+  if [ "$SCENARIO" = reinstall ]; then
+    $_xvuln || abort "active-slot ABL is not vulnerable; reinstall/repair cannot restore abl_$SLOT to itself"
+    RESTORE_SRC="$WORKDIR/active_abl.img"
+    SAVED_FROM_BACKUP=false
+    RESTORE_SKIP=true
+    ui_print "[*] active-slot ABL already provides the loader path; no ABL write needed"
+    return 0
   fi
 
   if $_xvuln; then
@@ -114,6 +124,10 @@ resolve_restore_source() {
 # restore_abl -> verified write of the restore source onto abl_<target>.
 # STEP/STEPS are the running step counter set by modes/install-common.sh.
 restore_abl() {
+  if $RESTORE_SKIP; then
+    _step "active-slot loader ABL verified; skipping ABL restore"
+    return 0
+  fi
   _step "restoring loader ABL to abl_$TARGET (backup + verify)"
   commit_verified "$RESTORE_SRC" "$TARGET_DEV" "$GBL_BACKUP_DIR/abl_$TARGET.img"
 }
