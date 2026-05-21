@@ -2,7 +2,8 @@
 # shellcheck disable=SC2154,SC2034
 # modes/graft-common.sh — reusable recovery vbmeta-graft helper.
 
-GRAFT_ROOT=/sdcard/gbl-chainload/graft
+GRAFT_CANDIDATE_ROOT=/sdcard/gbl-chainload/graft-candidate
+GRAFT_TARGET_ROOT=/sdcard/gbl-chainload/graft-target
 GRAFT_PARTS="recovery"
 GRAFT_ENABLED=0
 
@@ -18,6 +19,8 @@ graft_find_stock() {
   _other=a; [ "$_target_slot" = a ] && _other=b
   _stock=""
   _candidates="$_target_dev"
+  [ -f "$GRAFT_TARGET_ROOT/${_part}.img" ] \
+    && _candidates="$_candidates $GRAFT_TARGET_ROOT/${_part}.img"
   [ "${GRAFT_STOCK_TARGET_ONLY:-0}" = 1 ] \
     || _candidates="$_candidates $(byname "${_part}_${_other}")"
   for _cand in $_candidates; do
@@ -31,8 +34,20 @@ graft_find_stock() {
       break
     fi
   done
-  [ -n "$_stock" ] || abort "$_part: no suitable stock vbmeta candidate"
+  [ -n "$_stock" ] || abort "$_part: no stock target matches vbmeta_${_target_slot}; provide $GRAFT_TARGET_ROOT/${_part}.img and rerun"
   echo "$_stock"
+}
+
+graft_check_slot() {
+  _part=$1
+  _candidate=$2
+  _slot=$3
+  _mainvb=$(byname "vbmeta_${_slot}")
+  [ -n "$_mainvb" ] || return 1
+  dd if="$_mainvb" of="$WORKDIR/check_vbmeta_${_part}_${_slot}.img" bs=1M 2>/dev/null \
+    || return 1
+  vbmeta-graft check "$_candidate" "$WORKDIR/check_vbmeta_${_part}_${_slot}.img" \
+    "$_part" >/dev/null 2>&1
 }
 
 graft_prepare_one() {
@@ -56,6 +71,9 @@ graft_prepare_one() {
   vbmeta-graft graft --stock "$_stock" --custom "$_source" \
     --part-size "$_psz" --out "$WORKDIR/grafted_${_part}.img" \
     || abort "$_part: vbmeta-graft graft failed"
+  vbmeta-graft check "$WORKDIR/grafted_${_part}.img" \
+    "$WORKDIR/main_vbmeta_${_part}.img" "$_part" >/dev/null 2>&1 \
+    || abort "$_part: grafted image does not match vbmeta_${_target_slot}"
 
   eval "GRAFT_TARGET_${_part}='$_target'"
   eval "GRAFT_SLOT_${_part}='$_target_slot'"

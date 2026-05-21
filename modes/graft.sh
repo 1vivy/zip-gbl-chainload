@@ -1,10 +1,10 @@
 # shellcheck shell=sh
 # shellcheck disable=SC2154,SC1091
-# modes/graft.sh — graft stock vbmeta onto the namespaced custom recovery image.
+# modes/graft.sh — graft stock vbmeta onto the namespaced recovery candidate.
 #
-# /sdcard/gbl-chainload/graft/recovery.img is grafted and flashed to the
-# selected recovery_<slot>. Mode-1 OTA installs reuse graft-common.sh to do the
-# same operation automatically from the active recovery partition.
+# /sdcard/gbl-chainload/graft-candidate/recovery.img is grafted and flashed to
+# the selected recovery_<slot>. /sdcard/gbl-chainload/graft-target/recovery.img
+# can provide stock target metadata when the on-device slot is unsuitable.
 
 . "$WORKDIR/modes/graft-common.sh"
 
@@ -44,12 +44,12 @@ mode_main() {
   ui_print "graft: vbmeta graft installer"
   ui_print ""
 
-  [ -f "$GRAFT_ROOT/recovery.img" ] \
-    || abort "no namespaced graft input: $GRAFT_ROOT/recovery.img"
-  ui_print "[*] custom recovery image: $GRAFT_ROOT/recovery.img"
+  [ -f "$GRAFT_CANDIDATE_ROOT/recovery.img" ] \
+    || abort "no namespaced graft candidate: $GRAFT_CANDIDATE_ROOT/recovery.img"
+  ui_print "[*] recovery graft candidate: $GRAFT_CANDIDATE_ROOT/recovery.img"
 
   pick_slot
-  graft_prepare_one recovery "$GRAFT_ROOT/recovery.img" "$SLOT_SUF"
+  graft_prepare_one recovery "$GRAFT_CANDIDATE_ROOT/recovery.img" "$SLOT_SUF"
   graft_commit_prepared
 
   ui_print ""

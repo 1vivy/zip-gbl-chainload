@@ -11,7 +11,8 @@ A single mode-agnostic installer core (`META-INF/com/google/android/update-binar
 
 - `diag` — no-op environment diagnostic (no writes).
 - `graft` — namespaced custom-recovery vbmeta graft
-  (`/sdcard/gbl-chainload/graft/recovery.img`).
+  (`/sdcard/gbl-chainload/graft-candidate/recovery.img`, with optional stock
+  metadata at `/sdcard/gbl-chainload/graft-target/recovery.img`).
 - `mode-0-install` — gbl-chainload mode-0 (honest) EFISP install.
 - `mode-1-install` — gbl-chainload mode-1 (VerifiedBoot fakelock) EFISP install;
   on the OTA/inactive-slot pathway from recovery, it also grafts the active

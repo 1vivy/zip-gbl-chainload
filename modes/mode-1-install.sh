@@ -35,16 +35,29 @@ mode_preflight() {
   fi
 
   if ! $BOOTMODE; then
-    [ -f "$GRAFT_ROOT/recovery.img" ] \
-      || abort "first-time/reinstall mode-1 recovery install needs $GRAFT_ROOT/recovery.img"
-    ui_print "[*] first-time/reinstall recovery graft input: $GRAFT_ROOT/recovery.img"
-    graft_prepare_one recovery "$GRAFT_ROOT/recovery.img" "$TARGET"
+    if [ -f "$GRAFT_CANDIDATE_ROOT/recovery.img" ]; then
+      ui_print "[*] first-time/reinstall recovery candidate: $GRAFT_CANDIDATE_ROOT/recovery.img"
+      graft_prepare_one recovery "$GRAFT_CANDIDATE_ROOT/recovery.img" "$TARGET"
+      return 0
+    fi
+
+    _src=$(byname "recovery_$SLOT")
+    [ -n "$_src" ] || abort "recovery_$SLOT partition not found"
+    dd if="$_src" of="$WORKDIR/active_recovery.img" bs=1M 2>/dev/null \
+      || abort "cannot read recovery_$SLOT"
+    if graft_check_slot recovery "$WORKDIR/active_recovery.img" "$SLOT"; then
+      ui_print "[*] active recovery_$SLOT already matches active vbmeta; no recovery graft needed"
+      return 0
+    fi
+
+    ui_print "[*] active recovery_$SLOT is not graft-valid; trying to graft it in-place"
+    graft_prepare_one recovery "$WORKDIR/active_recovery.img" "$TARGET"
     return 0
   fi
 
-  if [ -f "$GRAFT_ROOT/recovery.img" ]; then
-    ui_print "[*] booted-system recovery graft input: $GRAFT_ROOT/recovery.img"
-    graft_prepare_one recovery "$GRAFT_ROOT/recovery.img" "$TARGET"
+  if [ -f "$GRAFT_CANDIDATE_ROOT/recovery.img" ]; then
+    ui_print "[*] booted-system recovery graft input: $GRAFT_CANDIDATE_ROOT/recovery.img"
+    graft_prepare_one recovery "$GRAFT_CANDIDATE_ROOT/recovery.img" "$TARGET"
   else
     ui_print "[*] booted-system install: no recovery graft input; skipping graft"
   fi
