@@ -37,7 +37,7 @@ detect_oem() {
   _mfr=$(grep -m1 '^ro\.product\..*manufacturer=' "$_bp" \
            | cut -d= -f2 | tr -d ' \t\r' | tr '[:upper:]' '[:lower:]')
   case "$_mfr" in
-    *oneplus*|*oppo*) OEM_ID=oneplus ;;
+    *oneplus*|*oppo*|*oplus*|*realme*) OEM_ID=oneplus ;;
     *) abort "unsupported OEM (build.prop manufacturer='$_mfr')" ;;
   esac
   ui_print "[*] OEM detected: $OEM_ID"
