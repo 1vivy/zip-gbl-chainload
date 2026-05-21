@@ -27,20 +27,47 @@ M_WANT_PROFILE=1
 STOCK_VBMETA=/sdcard/stock_vbmeta.img
 PROFILE_TOML=/sdcard/gbl-chainload_profile.toml
 
-# detect_oem -> sets OEM_ID from build.prop. Aborts on an unsupported OEM.
+# detect_oem -> sets OEM_ID from the device's product manufacturer. Aborts on
+# an unsupported OEM.
+#
+# In recovery, system/vendor are not mounted and their build.prop files do not
+# exist; the property service IS up, so `getprop` is the reliable source. Fall
+# back to the recovery ramdisk prop files (/prop.default, /default.prop) and
+# then to a mounted system/vendor build.prop.
 detect_oem() {
-  _bp=""
-  for _p in /system/system/build.prop /system/build.prop /vendor/build.prop; do
-    [ -f "$_p" ] && { _bp="$_p"; break; }
-  done
-  [ -n "$_bp" ] || abort "build.prop not found (mount system/vendor first)"
-  _mfr=$(grep -m1 '^ro\.product\..*manufacturer=' "$_bp" \
-           | cut -d= -f2 | tr -d ' \t\r' | tr '[:upper:]' '[:lower:]')
+  _mfr=""
+
+  # Primary: property service (recovery-safe, no mount needed).
+  if command -v getprop >/dev/null 2>&1; then
+    for _k in ro.product.manufacturer ro.product.system.manufacturer \
+              ro.product.vendor.manufacturer ro.product.odm.manufacturer \
+              ro.product.brand ro.product.system.brand \
+              ro.product.bootimage.manufacturer; do
+      _v=$(getprop "$_k" 2>/dev/null)
+      [ -n "$_v" ] && { _mfr=$_v; break; }
+    done
+  fi
+
+  # Fallback: read a prop file directly. /prop.default and /default.prop are
+  # present in the recovery ramdisk; the build.prop paths cover a booted/
+  # mounted system.
+  if [ -z "$_mfr" ]; then
+    for _p in /prop.default /default.prop \
+              /system/system/build.prop /system/build.prop /vendor/build.prop; do
+      [ -f "$_p" ] || continue
+      _mfr=$(grep -m1 -E '^ro\.product\.[^=]*manufacturer=' "$_p" \
+               | cut -d= -f2 | tr -d ' \t\r')
+      [ -n "$_mfr" ] && break
+    done
+  fi
+
+  [ -n "$_mfr" ] || abort "could not determine OEM (getprop and prop files empty)"
+  _mfr=$(printf '%s' "$_mfr" | tr '[:upper:]' '[:lower:]')
   case "$_mfr" in
     *oneplus*|*oppo*|*oplus*|*realme*) OEM_ID=oneplus ;;
-    *) abort "unsupported OEM (build.prop manufacturer='$_mfr')" ;;
+    *) abort "unsupported OEM (manufacturer='$_mfr')" ;;
   esac
-  ui_print "[*] OEM detected: $OEM_ID"
+  ui_print "[*] OEM detected: $OEM_ID (manufacturer=$_mfr)"
 }
 
 # build_profile -> derives + compiles the 120-byte mode2_profile binary.
