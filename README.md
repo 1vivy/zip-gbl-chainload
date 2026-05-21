@@ -10,9 +10,12 @@ A single mode-agnostic installer core (`META-INF/com/google/android/update-binar
 `modes/SELECTED` (generated at assembly time). Modes:
 
 - `diag` — no-op environment diagnostic (no writes).
-- `graft` — recovery vbmeta graft.
+- `graft` — namespaced custom-recovery vbmeta graft
+  (`/sdcard/gbl-chainload/graft/recovery.img`).
 - `mode-0-install` — gbl-chainload mode-0 (honest) EFISP install.
-- `mode-1-install` — gbl-chainload mode-1 (VerifiedBoot fakelock) EFISP install.
+- `mode-1-install` — gbl-chainload mode-1 (VerifiedBoot fakelock) EFISP install;
+  on the OTA/inactive-slot pathway from recovery, it also grafts the active
+  custom recovery onto the target slot's recovery partition when present.
 - `mode-2-install` — gbl-chainload mode-2 (QSEE/SPSS spoof) EFISP install.
 
 The three `mode-N-install` modes share a common body

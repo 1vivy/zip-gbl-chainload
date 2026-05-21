@@ -39,6 +39,11 @@
 #   mode_prepare    runs after resolve_restore_source, before build_payload
 #                   (per-mode preparation that populates M_PATCHER_ARGS /
 #                   M_PACK_ARGS). mode-2-install.sh overrides both.
+#   mode_preinstall_write runs after payload construction, before EFISP/ABL
+#                   writes, for optional companion writes that should fail
+#                   before the boot-chain install (mode-1 OTA recovery graft).
+#   mode_postinstall runs after the loader ABL restore for final no-op/status
+#                   hooks.
 # Both hooks run AFTER pick_scenario's interactive scenario prompt — a mode
 # that wants an early abort (e.g. unsupported-OEM in mode_prepare) will still
 # pay the vol-key scenario prompt first.
@@ -51,6 +56,8 @@ mode_preflight() { :; }
 # loader-ABL source is resolved and before any payload is built; a mode that
 # needs to populate M_PATCHER_ARGS / M_PACK_ARGS overrides this.
 mode_prepare() { :; }
+mode_preinstall_write() { :; }
+mode_postinstall() { :; }
 
 # preflight -> resolves device paths and gates everything before any write.
 preflight() {
@@ -94,7 +101,7 @@ build_payload() {
 # commit_efisp -> verified write of installed.efi onto EFISP.
 commit_efisp() {
   _step "writing EFISP (backup + verify)"
-  commit_verified "$WORKDIR/installed.efi" "$EFISP_DEV" /sdcard/efisp.bak
+  commit_verified "$WORKDIR/installed.efi" "$EFISP_DEV" "$GBL_BACKUP_DIR/efisp.img"
 }
 
 mode_main() {
@@ -106,13 +113,16 @@ mode_main() {
   STEP=0
   pick_scenario
   preflight
+  [ "${GRAFT_ENABLED:-0}" = 1 ] && STEPS=$((STEPS + 1))
   resolve_restore_source
   mode_prepare
   build_payload
+  mode_preinstall_write
   commit_efisp
   restore_abl
+  mode_postinstall
   save_backup_abl
   ui_print ""
   ui_print "$M_LABEL: done - reboot to use the cached ABL."
-  ui_print "backups kept: /sdcard/efisp.bak, /sdcard/abl_$TARGET.bak"
+  ui_print "backups kept: $GBL_BACKUP_DIR"
 }
