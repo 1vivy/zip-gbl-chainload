@@ -24,7 +24,7 @@ abort() {
 
 trap cleanup EXIT
 
-GBL_STATE_DIR=/sdcard/gbl-chainload
+GBL_STATE_DIR=${GBL_STATE_DIR:-/sdcard/gbl-chainload}
 GBL_BACKUP_DIR=$GBL_STATE_DIR/backups/latest
 
 ensure_parent_dir() {

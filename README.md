@@ -34,6 +34,9 @@ namespace on shared storage:
     recovery.img        # custom recovery image to graft/install explicitly
   graft-target/
     recovery.img        # optional stock recovery image used as graft metadata
+  mode-2/
+    stock_vbmeta.img    # required stock OEM vbmeta input for mode-2 installs
+    profile.toml        # derived mode-2 profile audit output
   backups/latest/
     efisp.img           # pre-write EFISP backup
     abl_<slot>.img      # pre-write ABL backup when an ABL slot is written
@@ -45,6 +48,7 @@ namespace on shared storage:
 `graft-candidate/recovery.img` is the recovery you want to keep or install.
 `graft-target/recovery.img` is optional: provide it when the target slot's
 current recovery image cannot supply stock vbmeta metadata for the graft.
+`mode-2/stock_vbmeta.img` is required for `gbl-chainload-mode-2-install.zip`.
 
 ## Install walkthrough
 
@@ -103,6 +107,21 @@ post-OTA install to the inactive slot. If
 `/sdcard/gbl-chainload/graft-candidate/recovery.img` exists, mode-1 grafts it to
 the inactive recovery slot first. If it is absent, BOOTMODE mode-1 skips recovery
 graft and continues with the boot-chain install.
+
+### Mode-2 input
+
+Before flashing `gbl-chainload-mode-2-install.zip`, place the stock OEM vbmeta at:
+
+```text
+/sdcard/gbl-chainload/mode-2/stock_vbmeta.img
+```
+
+The ZIP aborts before any write if this file is missing. It derives a readable
+profile next to it for audit/debugging:
+
+```text
+/sdcard/gbl-chainload/mode-2/profile.toml
+```
 
 ## Diagnostic ZIP
 

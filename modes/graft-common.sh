@@ -2,8 +2,8 @@
 # shellcheck disable=SC2154,SC2034
 # modes/graft-common.sh — reusable recovery vbmeta-graft helper.
 
-GRAFT_CANDIDATE_ROOT=/sdcard/gbl-chainload/graft-candidate
-GRAFT_TARGET_ROOT=/sdcard/gbl-chainload/graft-target
+GRAFT_CANDIDATE_ROOT=$GBL_STATE_DIR/graft-candidate
+GRAFT_TARGET_ROOT=$GBL_STATE_DIR/graft-target
 GRAFT_PARTS="recovery"
 GRAFT_ENABLED=0
 

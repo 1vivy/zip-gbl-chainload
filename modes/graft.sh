@@ -2,9 +2,9 @@
 # shellcheck disable=SC2154,SC1091
 # modes/graft.sh — graft stock vbmeta onto the namespaced recovery candidate.
 #
-# /sdcard/gbl-chainload/graft-candidate/recovery.img is grafted and flashed to
-# the selected recovery_<slot>. /sdcard/gbl-chainload/graft-target/recovery.img
-# can provide stock target metadata when the on-device slot is unsuitable.
+# $GBL_STATE_DIR/graft-candidate/recovery.img is grafted and flashed to the
+# selected recovery_<slot>. $GBL_STATE_DIR/graft-target/recovery.img can provide
+# stock target metadata when the on-device slot is unsuitable.
 
 . "$WORKDIR/modes/graft-common.sh"
 
