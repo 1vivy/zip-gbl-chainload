@@ -141,7 +141,7 @@ save_backup_abl() {
     cp "$RESTORE_SRC" "$BACKUP" && ui_print "[*] saved exploit ABL to $BACKUP"
   else
     ui_print "Save the exploit ABL just used to $BACKUP?"
-    ui_print "  Vol-UP = yes, else skip"
+    ui_print "  Vol-UP = yes   Vol-DOWN = skip"
     if [ "$(vol_key)" = UP ]; then
       mkdir -p "$GBL_BACKUP_DIR" || abort "cannot create $GBL_BACKUP_DIR"
       cp "$RESTORE_SRC" "$BACKUP" && ui_print "[*] saved exploit ABL to $BACKUP"
