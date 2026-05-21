@@ -1,6 +1,6 @@
 # shellcheck shell=sh
 # shellcheck disable=SC2154,SC2012
-# modes/diag.sh — pre-reboot EFISP-install confidence + state-bundle.
+# modes/diag.sh — pre-reboot EFISP-install state check + state-bundle.
 # Zero device writes. Stages a working dir at $BUNDLE_WORKDIR (default
 # /tmp — recovery tmpfs, lost on reboot) and produces a single
 # $BUNDLE_ROOT/gbl-chainload-diag-<ts>.tar.gz (default /sdcard) for the
@@ -13,10 +13,10 @@ BUNDLE_WORKDIR="${BUNDLE_WORKDIR:-/tmp}"       # where the staging dir lives
 BUNDLE_DIR="$BUNDLE_WORKDIR/gbl-chainload-diag-$TS"
 BUNDLE_TGZ="$BUNDLE_ROOT/gbl-chainload-diag-$TS.tar.gz"
 
-# Track scalar state for the confidence-tier decision.
+# Track scalar state for the rendered lines.
 EFISP_PE=0              # 1 if EFISP starts with MZ
 GBLP1_OK=0              # 1 if gblp1-inspect ended with result: ok
-BASE_EFI_MODE=""        # mode-0 / mode-1 / mode-2 / unknown
+HAS_MODE2_PROFILE=0     # 1 if the GBLP1 overlay carries a MODE2_PROFILE entry
 LOADER_PATH_A=0         # 1 if abl_a retains loader path
 LOADER_PATH_B=0         # 1 if abl_b retains loader path
 # Chain-broken bucket out of `vbmeta-graft list-hash`, populated in
@@ -105,34 +105,16 @@ collect_efisp() {
   gblp1-inspect "$BUNDLE_DIR/efisp.img" > "$BUNDLE_DIR/gblp1-inspect.txt" 2>&1 \
     && GBLP1_OK=1 || GBLP1_OK=0
 
-  # Fingerprint the base-EFI region (bytes before GBLP1) against MANIFEST.
-  if command -v sha256sum >/dev/null 2>&1; then
-    # Parse total_size from gblp1-inspect output.
-    _ts=$(awk '/^header:/ { for(i=1;i<=NF;i++) { if ($i ~ /^total_size=/) { sub(/^total_size=/, "", $i); print $i; exit } } }' "$BUNDLE_DIR/gblp1-inspect.txt")
-    if [ -n "$_ts" ] && [ "$_ts" -gt 0 ] 2>/dev/null; then
-      _total=$(stat -c%s "$BUNDLE_DIR/efisp.img" 2>/dev/null || wc -c < "$BUNDLE_DIR/efisp.img" | tr -d ' ')
-      _prefix_len=$((_total - _ts))
-      if [ "$_prefix_len" -gt 0 ] 2>/dev/null; then
-        _prefix_sha=$(dd if="$BUNDLE_DIR/efisp.img" bs=1 count="$_prefix_len" 2>/dev/null \
-                       | sha256sum | awk '{print $1}')
-        # Match against MANIFEST entries.
-        if [ -f "$WORKDIR/bin/MANIFEST" ]; then
-          while IFS= read -r _line; do
-            _h=$(echo "$_line" | awk '{print $1}')
-            _f=$(echo "$_line" | awk '{print $2}')
-            case "$_f" in
-              base/mode-0.efi) [ "$_h" = "$_prefix_sha" ] && BASE_EFI_MODE=mode-0 ;;
-              base/mode-1.efi) [ "$_h" = "$_prefix_sha" ] && BASE_EFI_MODE=mode-1 ;;
-              base/mode-2.efi) [ "$_h" = "$_prefix_sha" ] && BASE_EFI_MODE=mode-2 ;;
-            esac
-          done < "$WORKDIR/bin/MANIFEST"
-        fi
-      fi
-    fi
+  # Mode is read from the overlay contents, not a base-EFI hash: a mode-2
+  # install carries a MODE2_PROFILE entry; mode-0/1 do not. This avoids a
+  # per-build base-EFI SHA list (which went stale across versions/branches
+  # and forced a vendored-tool rebuild on every EFI change).
+  if grep -q '(MODE2_PROFILE)' "$BUNDLE_DIR/gblp1-inspect.txt" 2>/dev/null; then
+    HAS_MODE2_PROFILE=1
   fi
 
   if [ "$GBLP1_OK" = 1 ]; then
-    ui_print "  EFISP        : ${BASE_EFI_MODE:-unknown-base} + GBLP1 v1 ok"
+    ui_print "  EFISP        : GBLP1 v1 ok"
     # Sub-line per GBLP1 entry, in the order gblp1-inspect emitted them.
     # awk over `entry:` lines, pluck the parenthesised type name, label it.
     awk '/^entry:/ {
@@ -202,7 +184,7 @@ collect_vbmeta() {
 
 check_graft() {
   if [ ! -f "$BUNDLE_DIR/vbmeta_$SLOT.img" ]; then
-    ui_print "  action req   : unknown (no active vbmeta)"
+    ui_print "  avb chain    : unknown (no active vbmeta)"
     : > "$BUNDLE_DIR/graft-verdict.txt"
     return
   fi
@@ -216,45 +198,29 @@ check_graft() {
   # Hash-descriptor rows (`type=hash digest=mismatch`) are NOT extracted:
   # every installed mode tolerates them. The raw per-row data lives in
   # `graft-verdict.txt` in the bundle.
+  # Stock chained sub-vbmeta partitions (vbmeta_system, vbmeta_vendor, ...)
+  # are OEM-signed and never grafted by gbl-chainload, so exclude them — they
+  # are not actionable. Real graft targets (boot, dtbo, recovery, init_boot,
+  # vendor_boot) remain.
   CHAIN_BROKEN_LIST=$(awk '/type=chain/ && (/graft=no_vbmeta/ || /graft=key_mismatch/) {
-    for(i=1;i<=NF;i++) if($i ~ /^partition=/) {split($i,a,"="); printf "%s ",a[2]}
+    for(i=1;i<=NF;i++) if($i ~ /^partition=/) {
+      split($i,a,"="); p=a[2];
+      if (p !~ /^vbmeta/) printf "%s ",p
+    }
   }' "$BUNDLE_DIR/graft-verdict.txt" | sed 's/ $//')
 
-  # Render the action line, mode-aware:
-  #   mode-0 / mode-2 — ABL stays honest about unlock state, so libavb's
-  #                     allow_verification_error=true tolerates every
-  #                     descriptor-level outcome. mode-0 is pure
-  #                     debug-observation (no KM rewrite) and mode-2
-  #                     additionally fixes attestation at the TA layer;
-  #                     neither has any AVB-related boot blocker.
-  #   mode-1          — patch10 covers ABL libavb but NOT AOSP init's
-  #                     userspace re-verify. init skims the on-disk
-  #                     vbmeta (sig must verify; content hashes are not
-  #                     re-checked under locked-presenting state), so
-  #                     chain-broken rows are blockers and hash bucket
-  #                     is tolerated.
-  #   unknown         — base-EFI fingerprint didn't match MANIFEST.
-  #                     Frame using mode-1 semantics (the dominant
-  #                     pre-release-workflow case) and disclose so.
-  case "$BASE_EFI_MODE" in
-    mode-0|mode-2)
-      ui_print "  action req   : none"
-      ;;
-    mode-1)
-      if [ -z "$CHAIN_BROKEN_LIST" ]; then
-        ui_print "  action req   : none"
-      else
-        ui_print "  action req   : graft $CHAIN_BROKEN_LIST"
-      fi
-      ;;
-    *)
-      if [ -z "$CHAIN_BROKEN_LIST" ]; then
-        ui_print "  action req   : none (mode unknown — assumed mode-1)"
-      else
-        ui_print "  action req   : graft $CHAIN_BROKEN_LIST (mode unknown — assumed mode-1)"
-      fi
-      ;;
-  esac
+  # AVB-chain state — descriptive, not prescriptive. Only a mode-1
+  # (locked-presenting) boot makes AOSP init re-verify the on-disk vbmeta
+  # chain, so a broken chain is a *potential* blocker there; mode-2 (and
+  # mode-0) tolerate every mismatch. We can tell mode-2 from the overlay but
+  # not mode-1 from mode-0, so we report the observation + the mode-1
+  # condition rather than ordering a graft. Raw per-partition rows are in
+  # graft-verdict.txt.
+  if [ "$HAS_MODE2_PROFILE" = 1 ] || [ -z "$CHAIN_BROKEN_LIST" ]; then
+    ui_print "  avb chain    : ok"
+  else
+    ui_print "  avb chain    : $CHAIN_BROKEN_LIST fail verified-boot — could require graft (mode-1 only)"
+  fi
 }
 
 # ----- logfs blob ------------------------------------------------------
@@ -269,33 +235,6 @@ collect_logfs() {
     return
   fi
   dd if="$_dev" of="$BUNDLE_DIR/logfs.img" bs=1M 2>/dev/null
-}
-
-# ----- confidence tier --------------------------------------------------
-
-decide_tier() {
-  # NONE: EFISP is not a PE.
-  if [ "$EFISP_PE" = 0 ]; then
-    echo "NONE — EFISP is not a PE"
-    return
-  fi
-  # LOW: GBLP1 container invalid or unverified.
-  if [ "$GBLP1_OK" = 0 ]; then
-    echo "LOW — GBLP1 invalid or unverified"
-    return
-  fi
-  # MEDIUM-B: GBLP1 valid but base-EFI fingerprint did not match any MANIFEST entry.
-  if [ -z "$BASE_EFI_MODE" ]; then
-    echo "MEDIUM — GBLP1 valid; base-EFI fingerprint does not match any known mode-N hash"
-    return
-  fi
-  # MEDIUM-A: GBLP1 valid + base-EFI matches, but neither slot retains loader path.
-  if [ "$LOADER_PATH_A" != 1 ] && [ "$LOADER_PATH_B" != 1 ]; then
-    echo "MEDIUM — GBLP1 valid; neither slot's ABL retains loader path (EFISP won't be loaded)"
-    return
-  fi
-  # HIGH: all checks pass.
-  echo "HIGH — safe to reboot into chainload"
 }
 
 # ----- finalize --------------------------------------------------------
@@ -361,14 +300,13 @@ finalize_bundle() {
 
 mode_main() {
   prepare_bundle
-  ui_print "diag: pre-reboot install confidence"
+  ui_print "diag: pre-reboot install state"
   collect_env
   collect_efisp
   collect_abl
   collect_vbmeta
   check_graft
   collect_logfs                  # captures logfs.img into the bundle; no UI
-  ui_print "  confidence   : $(decide_tier)"
   ui_print ""
   finalize_bundle                # emits the `bundle saved` line itself
 }
