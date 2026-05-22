@@ -47,8 +47,12 @@ prepare_bundle() {
 }
 
 # Override ui_print to tee to report.txt while still writing to recovery I/O.
+# Both echoes tolerate a missing $BUNDLE_DIR: update-binary brackets mode_main
+# with its own ui_print calls (the version banner before prepare_bundle creates
+# the dir, and the trailing ""/"DONE." after finalize_bundle rm -rf's it), so an
+# unsuppressed report.txt append would leak "No such file or directory" lines.
 ui_print() {
-  echo "$1" >> "$BUNDLE_DIR/report.txt"
+  echo "$1" >> "$BUNDLE_DIR/report.txt" 2>/dev/null || true
   echo "ui_print $1
 ui_print" >> /proc/self/fd/"$OUTFD" 2>/dev/null || true
 }
