@@ -68,9 +68,44 @@ preflight() {
   [ -n "$EFISP_DEV" ]  || abort "efisp partition not found"
   [ -n "$ACTIVE_DEV" ] || abort "abl_$SLOT partition not found"
   [ -f "$WORKDIR/base/$M_EFI" ] || abort "base/$M_EFI missing from ZIP"
-  _mz=$(dd if="$EFISP_DEV" bs=1 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
-  [ "$_mz" = 4d5a ] || abort "EFISP does not currently hold a PE (got '$_mz')"
+  efisp_precondition
   mode_preflight
+}
+
+# efisp_precondition -> classify EFISP content and gate accordingly. Three
+# states, because the write (commit_efisp) replaces EFISP wholesale and the
+# old "must already be a PE" rule wrongly blocked a first-time install onto a
+# factory-blank EFISP:
+#   PE (MZ)          reinstall / OTA over an existing install — proceed.
+#   all-zero (blank) first-time install (or a wiped EFISP) — proceed, and set
+#                    EFISP_FIRST_INSTALL=1 so the operator is warned a /data
+#                    format may follow on next boot (verified-boot state change).
+#   anything else    EFISP holds unrecognised content (wrong partition, or a
+#                    partial/corrupt write). Refuse to silently clobber it: an
+#                    interactive recovery install requires an explicit vol-up;
+#                    a non-interactive (BOOTMODE / update_engine) install aborts.
+# "blank" is the WHOLE partition being zero — two leading zero bytes don't
+# prove it — so we scan all of EFISP (cheap: a few MiB read once).
+efisp_precondition() {
+  EFISP_FIRST_INSTALL=0
+  _mz=$(dd if="$EFISP_DEV" bs=1 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
+  if [ "$_mz" = 4d5a ]; then
+    return 0
+  fi
+  if [ "$(dd if="$EFISP_DEV" bs=1M 2>/dev/null | tr -d '\0' | wc -c)" = 0 ]; then
+    EFISP_FIRST_INSTALL=1
+    ui_print "[*] EFISP is blank — first-time install onto this slot"
+    ui_print "    note: a /data format may be required on next boot, since this"
+    ui_print "          may be the first change to the verified-boot state."
+    return 0
+  fi
+  ui_print "WARNING: EFISP holds unrecognised content (first 2 bytes = '$_mz' —"
+  ui_print "         not a PE, not blank). Installing will overwrite it."
+  if $BOOTMODE || $OTA_POSTINSTALL; then
+    abort "refusing to overwrite unrecognised EFISP content in a non-interactive install"
+  fi
+  ui_print "  Vol-UP = overwrite and continue   Vol-DOWN = abort"
+  [ "$(vol_key)" = UP ] || abort "aborted: EFISP holds unrecognised content"
 }
 
 # build_payload -> reads abl_<target>, builds the GBLP1 overlay, produces
