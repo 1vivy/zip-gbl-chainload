@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# update-tools.sh — refresh the vendored tool binaries and the three base
-# EFIs (mode-0/1/2) from a gbl-chainload parent checkout, and (re)write
+# update-tools.sh — refresh the vendored tool binaries and the single base
+# EFI (gbl-chainload.efi) from a gbl-chainload parent checkout, and (re)write
 # bin/MANIFEST.
+#
+# Engine rework: one EFI replaces the three per-mode EFIs. Mode selection is
+# manifest-driven at runtime by the GBLP1 overlay built into EFISP, not by
+# which base EFI is shipped.
 #
 # Run from inside the submodule checkout. The parent gbl-chainload repo
 # is the directory containing this submodule; override with --parent.
@@ -23,19 +27,20 @@ fi
 
 echo "==> building recovery tools from $PARENT"
 bash "$PARENT/scripts/build-recovery-tools.sh"
-echo "==> building the base EFIs"
-bash "$PARENT/scripts/build.sh" --mode 0
-bash "$PARENT/scripts/build.sh" --mode 1
-bash "$PARENT/scripts/build.sh" --mode 2
+echo "==> building the base EFI"
+bash "$PARENT/scripts/build.sh"
 
 echo "==> copying artifacts into bin/ and base/"
 mkdir -p "$SELF_DIR/bin" "$SELF_DIR/base"
 for t in fv-unwrap abl-patcher gbl-pack gbl-commit vbmeta-graft mode2-profile gblp1-inspect; do
   cp "$PARENT/dist/recovery/$t" "$SELF_DIR/bin/$t"
 done
-cp "$PARENT/dist/mode-0.efi" "$SELF_DIR/base/mode-0.efi"
-cp "$PARENT/dist/mode-1.efi" "$SELF_DIR/base/mode-1.efi"
-cp "$PARENT/dist/mode-2.efi" "$SELF_DIR/base/mode-2.efi"
+cp "$PARENT/dist/gbl-chainload.efi" "$SELF_DIR/base/gbl-chainload.efi"
+# Drop the legacy per-mode EFIs left from a prior update-tools run, so the
+# disk -> MANIFEST audit in build-recovery-zip.sh does not flag them.
+rm -f "$SELF_DIR/base/mode-0.efi" \
+      "$SELF_DIR/base/mode-1.efi" \
+      "$SELF_DIR/base/mode-2.efi"
 
 [ -f "$SELF_DIR/bin/busybox-arm64" ] \
   || { echo "error: bin/busybox-arm64 missing - vendor it once at bootstrap" >&2; exit 1; }
@@ -60,7 +65,7 @@ fi
   ( cd "$SELF_DIR" && sha256sum \
       bin/fv-unwrap bin/abl-patcher bin/gbl-pack bin/gbl-commit \
       bin/vbmeta-graft bin/mode2-profile bin/gblp1-inspect bin/busybox-arm64 \
-      base/mode-0.efi base/mode-1.efi base/mode-2.efi )
+      base/gbl-chainload.efi )
 } > "$SELF_DIR/bin/MANIFEST"
 
 echo "==> done. Review, commit the submodule, and bump its pointer in the parent."

@@ -27,12 +27,15 @@
 #
 # Per-mode parameters (set by the thin modes/mode-N-install.sh before sourcing,
 # or by mode_prepare for the mode-2 derived values):
-#   M_EFI          base EFI filename in base/ (mode-0.efi / mode-1.efi / mode-2.efi).
-#   M_LABEL        mode name, used in ui_print lines.
-#   M_PATCHER_ARGS extra args passed to abl-patcher ("" / "--no-mode1" /
-#                  "--oem <id> --no-mode1").
-#   M_PACK_ARGS    extra args passed to gbl-pack ("" / "--mode2-profile <path>").
-#   M_WANT_PROFILE 1 if this mode runs the mode_prepare profile hook, else unset.
+#   M_EFI            base EFI filename in base/ — always gbl-chainload.efi
+#                    post engine-rework; behavior is selected at runtime via
+#                    the GBLP1 manifest, not by which EFI is staged.
+#   M_LABEL          mode name, used in ui_print lines.
+#   M_MANIFEST_BITS  per-mode capability bits passed to gbl-pack --manifest.
+#                    0x00 (mode-0), 0x01 (mode-1 fakelock), 0x02 (mode-2 spoof).
+#   M_PATCHER_ARGS   extra args passed to abl-patcher ("" / "--oem <id>").
+#   M_PACK_ARGS      extra args passed to gbl-pack ("" / "--mode2-profile <path>").
+#   M_WANT_PROFILE   1 if this mode runs the mode_prepare profile hook, else unset.
 #
 # Two hooks, both no-op by default, both overridable by a thin mode file:
 #   mode_preflight  runs at the end of preflight (extra pre-write abort gates).
@@ -47,6 +50,55 @@
 # Both hooks run AFTER pick_scenario's interactive scenario prompt — a mode
 # that wants an early abort (e.g. unsupported-OEM in mode_prepare) will still
 # pay the vol-key scenario prompt first.
+
+# detect_oem -> sets OEM_ID from the device's product manufacturer. Aborts on
+# an unsupported OEM. Recovery-safe: prefers the property service and falls
+# back to ramdisk prop files (no mount required).
+#
+# In recovery, system/vendor are not mounted and their build.prop files do not
+# exist; the property service IS up, so `getprop` is the reliable source. Fall
+# back to the recovery ramdisk prop files (/prop.default, /default.prop) and
+# then to a mounted system/vendor build.prop.
+#
+# Lives in install-common.sh (not mode-2-install.sh) because the engine rework
+# made --oem orthogonal to mode: any install mode can opt into abl_permissive
+# by setting M_PATCHER_ARGS="--oem $OEM_ID". Today only mode-2's mode_prepare
+# calls this, but the helper is shared infra, not mode-2 specific.
+detect_oem() {
+  _mfr=""
+
+  # Primary: property service (recovery-safe, no mount needed).
+  if command -v getprop >/dev/null 2>&1; then
+    for _k in ro.product.manufacturer ro.product.system.manufacturer \
+              ro.product.vendor.manufacturer ro.product.odm.manufacturer \
+              ro.product.brand ro.product.system.brand \
+              ro.product.bootimage.manufacturer; do
+      _v=$(getprop "$_k" 2>/dev/null)
+      [ -n "$_v" ] && { _mfr=$_v; break; }
+    done
+  fi
+
+  # Fallback: read a prop file directly. /prop.default and /default.prop are
+  # present in the recovery ramdisk; the build.prop paths cover a booted/
+  # mounted system.
+  if [ -z "$_mfr" ]; then
+    for _p in /prop.default /default.prop \
+              /system/system/build.prop /system/build.prop /vendor/build.prop; do
+      [ -f "$_p" ] || continue
+      _mfr=$(grep -m1 -E '^ro\.product\.[^=]*manufacturer=' "$_p" \
+               | cut -d= -f2 | tr -d ' \t\r')
+      [ -n "$_mfr" ] && break
+    done
+  fi
+
+  [ -n "$_mfr" ] || abort "could not determine OEM (getprop and prop files empty)"
+  _mfr=$(printf '%s' "$_mfr" | tr '[:upper:]' '[:lower:]')
+  case "$_mfr" in
+    *oneplus*|*oppo*|*oplus*|*realme*) OEM_ID=oplus ;;
+    *) abort "unsupported OEM (manufacturer='$_mfr')" ;;
+  esac
+  ui_print "[*] OEM detected: $OEM_ID (manufacturer=$_mfr)"
+}
 
 # mode_preflight -> extra pre-flight gate hook. Default: no-op. Runs as the last
 # step of preflight, so an override's abort still fires before any write.
@@ -140,6 +192,7 @@ build_payload() {
            --source "$WORKDIR/cache_abl.img" \
            --extracted "$WORKDIR/extracted.efi" \
            $M_PACK_ARGS \
+           --manifest "$M_MANIFEST_BITS" \
            --out "$WORKDIR/payload.bin" \
     || abort "gbl-pack failed"
   cat "$WORKDIR/base/$M_EFI" "$WORKDIR/payload.bin" > "$WORKDIR/installed.efi"

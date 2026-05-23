@@ -5,16 +5,20 @@
 #
 # Sources the shared install body (modes/install-common.sh), declares the mode-1
 # parameters, and hooks the optional recovery graft flow. mode-1 caches a
-# plain-patched ABL (abl-patcher with no flags -> the universal + mode_1 patch
-# groups). The boot-chain install body still lives in install-common.sh.
+# plain-patched ABL (abl-patcher with no flags — abl_permissive is gated on
+# --oem, which mode-1 does not pass) and ships a manifest with the fakelock
+# capability bit set so the single gbl-chainload.efi engages the VerifiedBoot
+# fakelock at runtime. The boot-chain install body still lives in
+# install-common.sh.
 
 . "$WORKDIR/modes/graft-common.sh"
 . "$WORKDIR/modes/install-common.sh"
 
-M_EFI=mode-1.efi
+M_EFI=gbl-chainload.efi
 M_LABEL=mode-1-install
 M_PATCHER_ARGS=""
 M_PACK_ARGS=""
+M_MANIFEST_BITS=0x01
 
 mode_preflight() {
   GRAFT_ENABLED=0
