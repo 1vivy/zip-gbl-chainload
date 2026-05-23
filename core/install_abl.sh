@@ -31,11 +31,13 @@ vol_key() {
 }
 
 # abl_marker <abl-image> <scratch-pe-out> -> echoes present | absent.
-# Aborts if the image has no extractable PE. The bundled fv-unwrap prints
-# 'efisp-marker: present|absent' on stdout after a successful extraction.
+# Aborts if the image has no extractable PE. `gbl unwrap` (formerly the
+# stand-alone fv-unwrap tool, collapsed into the multicall in PR2 Task 9)
+# prints 'efisp-marker: present|absent' on stdout after a successful
+# extraction.
 abl_marker() {
-  _m=$(fv-unwrap "$1" "$2" 2>/dev/null) \
-    || abort "fv-unwrap failed on $1 (unrecognised ABL format?)"
+  _m=$(gbl unwrap "$1" "$2" 2>/dev/null) \
+    || abort "gbl unwrap failed on $1 (unrecognised ABL format?)"
   case "$_m" in
     *"efisp-marker: present"*) echo present ;;
     *)                         echo absent  ;;

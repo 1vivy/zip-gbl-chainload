@@ -33,12 +33,16 @@ STOCK_VBMETA=$GBL_STATE_DIR/mode-2/stock_vbmeta.img
 PROFILE_TOML=$GBL_STATE_DIR/mode-2/profile.toml
 
 # build_profile -> derives + compiles the 120-byte mode2_profile binary.
+# Kept as two steps (derive → compile) so the intermediate TOML stays
+# observable at $PROFILE_TOML for operator inspection / diffs; the
+# multicall's `gbl mode2 build` composite buffers the TOML in-memory
+# and would hide that, so we don't switch to it here.
 build_profile() {
   _step "deriving + compiling mode-2 profile from stock vbmeta"
-  mode2-profile derive "$STOCK_VBMETA" -o "$PROFILE_TOML" \
-    || abort "mode2-profile derive failed"
-  mode2-profile compile "$PROFILE_TOML" -o "$WORKDIR/profile.bin" \
-    || abort "mode2-profile compile failed"
+  gbl mode2 derive "$STOCK_VBMETA" -o "$PROFILE_TOML" \
+    || abort "gbl mode2 derive failed"
+  gbl mode2 compile "$PROFILE_TOML" -o "$WORKDIR/profile.bin" \
+    || abort "gbl mode2 compile failed"
 }
 
 # mode_prepare -> mode-2 hook override. Runs after resolve_restore_source and

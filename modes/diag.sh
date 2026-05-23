@@ -15,11 +15,11 @@ BUNDLE_TGZ="$BUNDLE_ROOT/gbl-chainload-diag-$TS.tar.gz"
 
 # Track scalar state for the rendered lines.
 EFISP_PE=0              # 1 if EFISP starts with MZ
-GBLP1_OK=0              # 1 if gblp1-inspect ended with result: ok
+GBLP1_OK=0              # 1 if `gbl inspect` ended with result: ok
 HAS_MODE2_PROFILE=0     # 1 if the GBLP1 overlay carries a MODE2_PROFILE entry
 LOADER_PATH_A=0         # 1 if abl_a retains loader path
 LOADER_PATH_B=0         # 1 if abl_b retains loader path
-# Chain-broken bucket out of `vbmeta-graft list-hash`, populated in
+# Chain-broken bucket out of `gbl avb list-hash`, populated in
 # check_graft. This is the AOSP first-stage init boot-blocker set:
 # AvbFooter missing OR vbmeta sig won't verify against the OEM chain key
 # (graft=no_vbmeta / graft=key_mismatch). Only mode-1 surfaces it on
@@ -77,7 +77,7 @@ collect_env() {
 
 # ----- EFISP -----------------------------------------------------------
 
-# Map a GBLP1 entry type-name (as printed by gblp1-inspect, e.g. CACHED_ABL)
+# Map a GBLP1 entry type-name (as printed by `gbl inspect`, e.g. CACHED_ABL)
 # to an operator-friendly label. Unknown types are echoed as-is so a future
 # entry-type addition still surfaces something rather than nothing.
 _entry_pretty_label() {
@@ -106,7 +106,7 @@ collect_efisp() {
     return
   fi
   EFISP_PE=1
-  gblp1-inspect "$BUNDLE_DIR/efisp.img" > "$BUNDLE_DIR/gblp1-inspect.txt" 2>&1 \
+  gbl inspect "$BUNDLE_DIR/efisp.img" > "$BUNDLE_DIR/gblp1-inspect.txt" 2>&1 \
     && GBLP1_OK=1 || GBLP1_OK=0
 
   # Mode is read from the overlay contents, not a base-EFI hash: a mode-2
@@ -119,7 +119,7 @@ collect_efisp() {
 
   if [ "$GBLP1_OK" = 1 ]; then
     ui_print "  EFISP        : GBLP1 v1 ok"
-    # Sub-line per GBLP1 entry, in the order gblp1-inspect emitted them.
+    # Sub-line per GBLP1 entry, in the order `gbl inspect` emitted them.
     # awk over `entry:` lines, pluck the parenthesised type name, label it.
     awk '/^entry:/ {
       for(i=1;i<=NF;i++) if ($i ~ /^\(/) {
@@ -152,9 +152,9 @@ collect_abl() {
     _dev=$(byname "abl_$_slot")
     [ -n "$_dev" ] || continue
     dd if="$_dev" of="$BUNDLE_DIR/abl_$_slot.img" bs=1M 2>/dev/null
-    # Try fv-unwrap to extract the PE; fall back to scanning the raw image.
+    # Try `gbl unwrap` to extract the PE; fall back to scanning the raw image.
     _pe_path="$WORKDIR/abl_$_slot.pe"
-    if fv-unwrap "$BUNDLE_DIR/abl_$_slot.img" "$_pe_path" >/dev/null 2>&1; then
+    if gbl unwrap "$BUNDLE_DIR/abl_$_slot.img" "$_pe_path" >/dev/null 2>&1; then
       _scan_target="$_pe_path"
     else
       _scan_target="$BUNDLE_DIR/abl_$_slot.img"
@@ -180,7 +180,7 @@ collect_vbmeta() {
     dd if="$_dev" of="$BUNDLE_DIR/vbmeta_$_slot.img" bs=1M 2>/dev/null
   done
   if [ -f "$BUNDLE_DIR/vbmeta_$SLOT.img" ]; then
-    vbmeta-graft list "$BUNDLE_DIR/vbmeta_$SLOT.img" > "$BUNDLE_DIR/vbmeta-descriptors.txt" 2>&1 || true
+    gbl avb list "$BUNDLE_DIR/vbmeta_$SLOT.img" > "$BUNDLE_DIR/vbmeta-descriptors.txt" 2>&1 || true
   else
     : > "$BUNDLE_DIR/vbmeta-descriptors.txt"
   fi
@@ -192,10 +192,10 @@ check_graft() {
     : > "$BUNDLE_DIR/graft-verdict.txt"
     return
   fi
-  GBL_VBMETA_SLOT="$SLOT" vbmeta-graft list-hash \
+  GBL_VBMETA_SLOT="$SLOT" gbl avb list-hash \
     "$BUNDLE_DIR/vbmeta_$SLOT.img" "$BYNAME" > "$BUNDLE_DIR/graft-verdict.txt" 2>&1 || true
 
-  # Pull AOSP-init boot-blocker rows from `vbmeta-graft list-hash`:
+  # Pull AOSP-init boot-blocker rows from `gbl avb list-hash`:
   # chain partitions whose AvbFooter is absent (no_vbmeta → init returns
   # ok_not_signed) or whose embedded vbmeta won't sig-verify against the
   # chain descriptor's OEM pubkey (key_mismatch → init libavb rejects).

@@ -31,10 +31,10 @@
 #                    post engine-rework; behavior is selected at runtime via
 #                    the GBLP1 manifest, not by which EFI is staged.
 #   M_LABEL          mode name, used in ui_print lines.
-#   M_MANIFEST_BITS  per-mode capability bits passed to gbl-pack --manifest.
+#   M_MANIFEST_BITS  per-mode capability bits passed to `gbl pack --manifest`.
 #                    0x00 (mode-0), 0x01 (mode-1 fakelock), 0x02 (mode-2 spoof).
-#   M_PATCHER_ARGS   extra args passed to abl-patcher ("" / "--oem <id>").
-#   M_PACK_ARGS      extra args passed to gbl-pack ("" / "--mode2-profile <path>").
+#   M_PATCHER_ARGS   extra args passed to `gbl patch` ("" / "--oem <id>").
+#   M_PACK_ARGS      extra args passed to `gbl pack` ("" / "--mode2-profile <path>").
 #   M_WANT_PROFILE   1 if this mode runs the mode_prepare profile hook, else unset.
 #
 # Two hooks, both no-op by default, both overridable by a thin mode file:
@@ -161,8 +161,8 @@ efisp_precondition() {
 }
 
 # build_payload -> reads abl_<target>, builds the GBLP1 overlay, produces
-# $WORKDIR/installed.efi (base EFI + payload). abl-patcher and gbl-pack get the
-# per-mode M_PATCHER_ARGS / M_PACK_ARGS appended.
+# $WORKDIR/installed.efi (base EFI + payload). `gbl patch` and `gbl pack` get
+# the per-mode M_PATCHER_ARGS / M_PACK_ARGS appended.
 build_payload() {
   _step "caching abl_$TARGET (patch args: ${M_PATCHER_ARGS:-none})"
   if [ "$SCENARIO" = reinstall ] && [ -f "$CACHE_BACKUP" ]; then
@@ -179,22 +179,22 @@ build_payload() {
       ui_print "[*] saved latest ABL cache source to $CACHE_BACKUP"
     fi
   fi
-  fv-unwrap "$WORKDIR/cache_abl.img" "$WORKDIR/extracted.efi" >/dev/null 2>&1 \
-    || abort "fv-unwrap failed on the cache-source ABL"
+  gbl unwrap "$WORKDIR/cache_abl.img" "$WORKDIR/extracted.efi" >/dev/null 2>&1 \
+    || abort "gbl unwrap failed on the cache-source ABL"
   # M_PATCHER_ARGS / M_PACK_ARGS are intentionally word-split.
   # shellcheck disable=SC2086
-  abl-patcher $M_PATCHER_ARGS \
+  gbl patch $M_PATCHER_ARGS \
     --in "$WORKDIR/extracted.efi" --out "$WORKDIR/patched.efi" \
-    || abort "abl-patcher failed (no matching signatures?)"
+    || abort "gbl patch failed (no matching signatures?)"
   _step "packing GBLP1 overlay"
   # shellcheck disable=SC2086
-  gbl-pack --cached-abl "$WORKDIR/patched.efi" \
+  gbl pack --cached-abl "$WORKDIR/patched.efi" \
            --source "$WORKDIR/cache_abl.img" \
            --extracted "$WORKDIR/extracted.efi" \
            $M_PACK_ARGS \
            --manifest "$M_MANIFEST_BITS" \
            --out "$WORKDIR/payload.bin" \
-    || abort "gbl-pack failed"
+    || abort "gbl pack failed"
   cat "$WORKDIR/base/$M_EFI" "$WORKDIR/payload.bin" > "$WORKDIR/installed.efi"
 }
 

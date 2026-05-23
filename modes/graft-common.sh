@@ -1,6 +1,8 @@
 # shellcheck shell=sh
 # shellcheck disable=SC2154,SC2034
 # modes/graft-common.sh — reusable recovery vbmeta-graft helper.
+# Calls `gbl avb {check,graft}` (PR2 Task 9 collapsed the historic
+# stand-alone vbmeta-graft binary into the `gbl` multicall).
 
 GRAFT_CANDIDATE_ROOT=$GBL_STATE_DIR/graft-candidate
 GRAFT_TARGET_ROOT=$GBL_STATE_DIR/graft-target
@@ -26,7 +28,7 @@ graft_find_stock() {
   for _cand in $_candidates; do
     [ -n "$_cand" ] || continue
     dd if="$_cand" of="$WORKDIR/cand_${_part}.img" bs=1M 2>/dev/null || continue
-    if vbmeta-graft check "$WORKDIR/cand_${_part}.img" "$_mainvb" \
+    if gbl avb check "$WORKDIR/cand_${_part}.img" "$_mainvb" \
          "$_part" >/dev/null 2>&1; then
       cp "$WORKDIR/cand_${_part}.img" "$WORKDIR/stock_${_part}.img"
       _stock="$WORKDIR/stock_${_part}.img"
@@ -46,7 +48,7 @@ graft_check_slot() {
   [ -n "$_mainvb" ] || return 1
   dd if="$_mainvb" of="$WORKDIR/check_vbmeta_${_part}_${_slot}.img" bs=1M 2>/dev/null \
     || return 1
-  vbmeta-graft check "$_candidate" "$WORKDIR/check_vbmeta_${_part}_${_slot}.img" \
+  gbl avb check "$_candidate" "$WORKDIR/check_vbmeta_${_part}_${_slot}.img" \
     "$_part" >/dev/null 2>&1
 }
 
@@ -68,10 +70,10 @@ graft_prepare_one() {
 
   _stock=$(graft_find_stock "$_part" "$_target_slot" "$_target" "$WORKDIR/main_vbmeta_${_part}.img")
   _psz=$(blockdev --getsize64 "$_target") || abort "cannot size $_target"
-  vbmeta-graft graft --stock "$_stock" --custom "$_source" \
+  gbl avb graft --stock "$_stock" --custom "$_source" \
     --part-size "$_psz" --out "$WORKDIR/grafted_${_part}.img" \
-    || abort "$_part: vbmeta-graft graft failed"
-  vbmeta-graft check "$WORKDIR/grafted_${_part}.img" \
+    || abort "$_part: gbl avb graft failed"
+  gbl avb check "$WORKDIR/grafted_${_part}.img" \
     "$WORKDIR/main_vbmeta_${_part}.img" "$_part" >/dev/null 2>&1 \
     || abort "$_part: grafted image does not match vbmeta_${_target_slot}"
 

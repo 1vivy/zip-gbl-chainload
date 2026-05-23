@@ -36,11 +36,13 @@ ensure_parent_dir() {
 
 # commit_verified <src-file> <dst-block> <backup-path>
 # backup -> write -> verify -> restore-on-mismatch, via the bundled
-# gbl-commit. A writing mode MUST use this, never a bare dd. SP2 ships
-# no writing mode; this is the contract SP3/SP4 build on.
+# `gbl commit` multicall (PR2 Task 9 collapsed the historic per-tool
+# gbl-commit binary into `gbl commit`). A writing mode MUST use this,
+# never a bare dd. SP2 ships no writing mode; this is the contract
+# SP3/SP4 build on.
 commit_verified() {
-  command -v gbl-commit >/dev/null 2>&1 || abort "gbl-commit not on PATH"
+  command -v gbl >/dev/null 2>&1 || abort "gbl multicall not on PATH"
   ensure_parent_dir "$3"
-  gbl-commit --src "$1" --dst "$2" --backup "$3" --verify \
+  gbl commit --src "$1" --dst "$2" --backup "$3" --verify \
     || abort "verified write to $2 failed (backup at $3)"
 }

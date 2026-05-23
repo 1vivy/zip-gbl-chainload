@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# update-tools.sh — refresh the vendored tool binaries and the single base
-# EFI (gbl-chainload.efi) from a gbl-chainload parent checkout, and (re)write
-# bin/MANIFEST.
+# update-tools.sh — refresh the vendored tool binary and the single base
+# EFI (gbl-chainload.efi) from a gbl-chainload parent checkout, and
+# (re)write bin/MANIFEST.
 #
-# Engine rework: one EFI replaces the three per-mode EFIs. Mode selection is
-# manifest-driven at runtime by the GBLP1 overlay built into EFISP, not by
-# which base EFI is shipped.
+# Engine rework: one EFI replaces the three per-mode EFIs.
+# PR2 Task 9: the 7 per-tool C binaries collapsed into a single `gbl`
+# Rust multicall (cross-built for aarch64-linux-android), so this
+# script copies one binary into bin/ rather than seven.
 #
 # Run from inside the submodule checkout. The parent gbl-chainload repo
 # is the directory containing this submodule; override with --parent.
@@ -25,22 +26,30 @@ fi
 [ -f "$PARENT/scripts/build-recovery-tools.sh" ] \
   || { echo "error: $PARENT is not a gbl-chainload checkout" >&2; exit 1; }
 
-echo "==> building recovery tools from $PARENT"
+echo "==> building recovery tool (gbl multicall) from $PARENT"
 bash "$PARENT/scripts/build-recovery-tools.sh"
 echo "==> building the base EFI"
 bash "$PARENT/scripts/build.sh"
 
 echo "==> copying artifacts into bin/ and base/"
 mkdir -p "$SELF_DIR/bin" "$SELF_DIR/base"
-for t in fv-unwrap abl-patcher gbl-pack gbl-commit vbmeta-graft mode2-profile gblp1-inspect; do
-  cp "$PARENT/dist/recovery/$t" "$SELF_DIR/bin/$t"
-done
+cp "$PARENT/dist/recovery/gbl" "$SELF_DIR/bin/gbl"
 cp "$PARENT/dist/gbl-chainload.efi" "$SELF_DIR/base/gbl-chainload.efi"
 # Drop the legacy per-mode EFIs left from a prior update-tools run, so the
 # disk -> MANIFEST audit in build-recovery-zip.sh does not flag them.
 rm -f "$SELF_DIR/base/mode-0.efi" \
       "$SELF_DIR/base/mode-1.efi" \
       "$SELF_DIR/base/mode-2.efi"
+# Drop the legacy per-tool C binaries (collapsed into bin/gbl in PR2 Task 9).
+# Without this, an in-place update from a pre-Task-9 zip checkout would
+# leave the old binaries on disk and fail the MANIFEST disk-coverage audit.
+rm -f "$SELF_DIR/bin/fv-unwrap" \
+      "$SELF_DIR/bin/abl-patcher" \
+      "$SELF_DIR/bin/gbl-pack" \
+      "$SELF_DIR/bin/gbl-commit" \
+      "$SELF_DIR/bin/vbmeta-graft" \
+      "$SELF_DIR/bin/mode2-profile" \
+      "$SELF_DIR/bin/gblp1-inspect"
 
 [ -f "$SELF_DIR/bin/busybox-arm64" ] \
   || { echo "error: bin/busybox-arm64 missing - vendor it once at bootstrap" >&2; exit 1; }
@@ -63,8 +72,7 @@ fi
   echo "# parent-commit: $PCOMMIT"
   echo "# parent-dirty: $PDIRTY"
   ( cd "$SELF_DIR" && sha256sum \
-      bin/fv-unwrap bin/abl-patcher bin/gbl-pack bin/gbl-commit \
-      bin/vbmeta-graft bin/mode2-profile bin/gblp1-inspect bin/busybox-arm64 \
+      bin/gbl bin/busybox-arm64 \
       base/gbl-chainload.efi )
 } > "$SELF_DIR/bin/MANIFEST"
 
