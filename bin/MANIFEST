@@ -1,6 +1,6 @@
 # zip-gbl-chainload vendored-artifact manifest
-# parent-commit: a867d5b20fa29a18718b24696099728025d3a4a7
+# parent-commit: 6a66a438db2140c979065b8702014f4c65a65de5
 # parent-dirty: 0
-f35804da40d27ac249dfcf2298a2cb5278801ae7284bd3c67247d127e1c6a0eb  bin/gbl
+952d19919c7933ab3fc7f8e86e21f2e69cf3b8c5e7b44c94c2c59908dfd692c8  bin/gbl
 4d60ab3f5a59ebb2ca863f2f514e6924401b581e9b64f602665c008177626651  bin/busybox-arm64
-8660c93e318bf01fec1a8b0b7d04c5253b40cc2ed0de4fbc60552f3ed0791f5f  base/gbl-chainload.efi
+3e61f41f0bb56cac40566745423edd130a8f698235c5d4369dcd7fa327c2c0fb  base/gbl-chainload.efi
